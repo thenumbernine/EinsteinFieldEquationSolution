@@ -1,0 +1,14 @@
+Einstein Field Equation solution calculator.
+
+Accepts stress-energy source terms of matter (density, specific internal energy, pressure) and electromagnetism (electric field, magnetic field).
+Converges on solution via...
+(1) linear solver with solution vector corresponding to stress-energy source terms (which is constantly changing per-iteration, since the stress-energy tensor is based on the metric, which is being solved for)
+(2) JFNK solver whose zero is equal to the EFE: G_ab - 8 pi T_ab
+
+goals:
+1) verify Newtonian gravity matches Schwarzschild gravity from on to above the surface (check, from solar system project)
+2) verify Schwarzschild stellar model gravity due to analytical connection equations is maximal at surface, ->0 as r->0 and r->infinity (check)
+3) verify Schwarzschild stellar model gravity due to finite difference matches the analytical connection equation values (still working on this ...)
+3.5?) Find a metric within stars with nonzero G_ab = 8 pi T_ab, T_ab = diag(rho, P, P, P).  The current Schwarzschild model treats all matter as a point source, within the radius of the point of evaluation of the metric, and therefore always has G_ab = 0.
+	This *might* help the initial conditions, but shouldn't make a difference once numerical solution solving gets working.
+4) Get the numerical solution solver to work, and accurately.  Especially for it to start at flat space, given Earth's stress-energy source term, and come up with Earth's gravity, as the Schwarzschild analytical answer already gives us. 

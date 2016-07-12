@@ -37,7 +37,7 @@ local clipInfos = range(4):map(function(i)
 	local plane = vec4(0,0,0,0)
 	plane[math.min(i,3)] = -1
 	return {
-		enabled = ffi.new('bool[1]', i==1),
+		enabled = ffi.new('bool[1]', i==3),
 		plane = plane,
 	}
 end)
@@ -53,6 +53,7 @@ function App:initGL()
 	for l in io.lines'out.txt' do
 		l = l:trim()
 		if #l > 0 and l:sub(1,1) ~= '#' then
+			-- TODO pick out column titles from first line that starts with '#'
 			l = l:gsub('[%(%),]', '')
 				:gsub('%w+=', '')
 			w = l:split'%s+'
@@ -72,7 +73,13 @@ function App:initGL()
 		end
 	end
 
-print('#pts',#self.pts)
+local half = math.floor(self.max[1]/2)
+for i=half,self.max[1] do
+	local index = i + (self.max[1]+1) * (half + (self.max[2]+1) * half) + 1 
+	local pt = self.pts[index]
+	print(pt[1], pt[7])
+end
+
 	-- this assumes our points are sequential (and that they are power-of-two?)
 	local data = ffi.new('unsigned char[?]', #self.pts*4)
 	for col=4,colmax do

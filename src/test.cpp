@@ -6,6 +6,7 @@ might get into trouble ensuring the hamiltonian or momentum constraints are fulf
 #include "Tensor/Tensor.h"
 #include "Tensor/Grid.h"
 #include "Tensor/Inverse.h"
+#include "Tensor/Derivative.h"
 #include "Solvers/JFNK.h"
 #include "Parallel/Parallel.h"
 #include <functional>
@@ -139,6 +140,35 @@ const real c = 299792458;	// m/s
 const real G = 6.67384e-11;	// m^3 / (kg s^2)
 //const real kB = 1.3806488e-23;	// m^2 kg / (K s^2)
 
+//grids
+Grid<Vector<real, spatialDim>, spatialDim> xs;
+Grid<StressEnergyPrims, spatialDim> stressEnergyPrimGrid;
+Grid<MetricPrims, spatialDim> metricPrimGrid;
+
+//some helper storage...
+Grid<Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> gLLs;
+Grid<Tensor<real, Symmetric<Upper<dim>, Upper<dim>>>, spatialDim> gUUs;
+Grid<Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> GammaULLs;
+
+template<typename CellType>
+void allocateGrid(Grid<CellType, spatialDim>& grid, std::string name, Vector<int, spatialDim> sizev, size_t& totalSize) {
+	size_t size = sizeof(CellType) * sizev.volume();
+	totalSize += size;
+	std::cerr << name << ": " << size << " bytes, running total: " << totalSize << std::endl;
+	grid.resize(sizev);
+}
+
+void allocateGrids(Vector<int, spatialDim> sizev) {
+	std::cerr << std::endl;
+	size_t totalSize = 0;
+	allocateGrid(xs, "xs", sizev, totalSize);
+	allocateGrid(stressEnergyPrimGrid, "stressEnergyPrimGrid", sizev, totalSize);
+	allocateGrid(metricPrimGrid, "metricPrimGrid", sizev, totalSize);
+	allocateGrid(gLLs, "gLLs", sizev, totalSize);
+	allocateGrid(gUUs, "gUUs", sizev, totalSize);
+	allocateGrid(GammaULLs, "GammaULLs", sizev, totalSize);
+}
+
 int main() {
 
 #if 1	//earth
@@ -169,24 +199,7 @@ int main() {
 	int gridVolume = sizev.volume();
 	Vector<real, spatialDim> dx = (xmax - xmin) / sizev;
 
-	//grids
-	Grid<Vector<real, spatialDim>, spatialDim> xs;
-	Grid<StressEnergyPrims, spatialDim> stressEnergyPrimGrid;
-	Grid<MetricPrims, spatialDim> metricPrimGrid;
-	
-	//some helper storage...
-	Grid<Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> gLLs;
-	Grid<Tensor<real, Symmetric<Upper<dim>, Upper<dim>>>, spatialDim> gUUs;
-	Grid<Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> GammaULLs;
-
-	time("allocating", [&]{
-		xs.resize(sizev);
-		stressEnergyPrimGrid.resize(sizev);
-		metricPrimGrid.resize(sizev);
-		gLLs.resize(sizev);
-		gUUs.resize(sizev);
-		GammaULLs.resize(sizev);
-	});
+	time("allocating", [&]{ allocateGrids(sizev); });
 
 	//specify coordinates
 	RangeObj<spatialDim> range = xs.range();
@@ -272,12 +285,29 @@ int main() {
 	auto calc_GammaULLs = [&](const real* x) {
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 			//derivatives of the metric in spatial coordinates using finite difference
+			//the templated method (1) stores derivative first and (2) only stores spatial
+			Tensor<real, Lower<spatialDim>, Symmetric<Lower<dim>, Lower<dim>>> dgLLL3 = partialDerivative<
+				8,
+				real,
+				spatialDim,
+				Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>
+			>(
+				index, dx,
+				[&](Vector<int, spatialDim> index)
+					-> Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>
+				{
+					for (int i = 0; i < spatialDim; ++i) {
+						index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
+					}
+					return gLLs(index);
+				}
+			);
 			Tensor<real, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> dgLLL;
 			for (int a = 0; a < dim; ++a) {
 				for (int b = 0; b < dim; ++b) {	
 					dgLLL(a,b,0) = 0;	//TODO time derivative? for now assume steady state of metric.  this isn't necessary though ... spacetime vortex?
 					for (int i = 0; i < spatialDim; ++i) {
-						dgLLL(a,b,i+1) = (gLLs(next(index,i))(a,b) - gLLs(prev(index,i))(a,b)) / (2 * dx(i));
+						dgLLL(a,b,i+1) = dgLLL3(i,a,b);
 					}
 				}
 			}
@@ -327,6 +357,7 @@ int main() {
 	time("calculating metric primitives", [&]{
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 			MetricPrims& metricPrims = metricPrimGrid(index);
+			
 			real r = Vector<real, spatialDim>::length(xs(index));
 			Vector<real, spatialDim> xi = xs(index);
 			//mass within radius
@@ -432,13 +463,30 @@ exit(0);
 			parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 
 				//connection derivative
+				Tensor<real, Lower<spatialDim>, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>> dGammaLULL3 = partialDerivative<
+					8,
+					real,
+					spatialDim,
+					Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>>
+				>(
+					index, dx,
+					[&](Vector<int, spatialDim> index)
+						-> Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>>
+					{
+						for (int i = 0; i < spatialDim; ++i) {
+							index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
+						}
+						return GammaULLs(index);
+					}
+				);			
+				
 				Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> dGammaULLL;
 				for (int a = 0; a < dim; ++a) {
 					for (int b = 0; b < dim; ++b) {
 						for (int c = 0; c <= b; ++c) {
 							dGammaULLL(a,b,c,0) = 0;	//TODO explicit calculate Gamma^a_bc,t in terms of alpha, beta^i, gamma_ij
 							for (int i = 0; i < spatialDim; ++i) {
-								dGammaULLL(a,b,c,i+1) = (GammaULLs(next(index,i))(a,b,c) - GammaULLs(prev(index,i))(a,b,c)) / (2 * dx(i));
+								dGammaULLL(a,b,c,i+1) = dGammaLULL3(i,a,b,c);
 							}
 						}
 					}

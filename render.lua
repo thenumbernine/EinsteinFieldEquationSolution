@@ -355,7 +355,7 @@ end
 
 function App:updateGUI()
 	ig.igSliderInt('col', col, 4, colmax)
-	ig.igText('range: '..self.min[col[0]]..' to '..self.max[col[0]])
+	ig.igText(self.min[col[0]]..' to '..self.max[col[0]])
 	ig.igImage(
 		ffi.cast('void*',ffi.cast('intptr_t',hsvTex.id)),
 		ig.ImVec2(128, 32))

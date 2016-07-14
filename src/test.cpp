@@ -14,11 +14,8 @@ might get into trouble ensuring the hamiltonian or momentum constraints are fulf
 #include <functional>
 #include <chrono>
 
-//#define USE_JFNK	//use JFNK to solve
-#define USE_GMRES	//use GMRes Ax=b for x = (alpha, beta^i, gamma_ij), A(x) = G_ab, and b = 8 pi T_ab ... but T_ab is based on metric prims as well, so keep updating them ...
-
-//#define INIT_FLAT		//start with flat spacetime
-#define INIT_STELLAR	//start with MTW ch.23 stellar model, based on Schwarzschild metric
+#define USE_JFNK	//use JFNK to solve
+//#define USE_GMRES	//use GMRes Ax=b for x = (alpha, beta^i, gamma_ij), A(x) = G_ab, and b = 8 pi T_ab ... but T_ab is based on metric prims as well, so keep updating them ...
 
 Parallel::Parallel parallel(8);
 
@@ -74,10 +71,10 @@ Tensor<real, Upper<3>> cross(Tensor<real, Upper<3>> a, Tensor<real, Upper<3>> b)
 //variables used to build the metric 
 //dim * (dim+1) / 2 vars
 struct MetricPrims {
-	real alpha;
+	real ln_alpha;
 	Tensor<real, Upper<spatialDim>> betaU;
 	Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>> gammaLL;
-	MetricPrims() : alpha(0) {}
+	MetricPrims() : ln_alpha(0) {}
 };
 
 //variables used to build the stress-energy tensor
@@ -172,7 +169,7 @@ Vector<real, spatialDim>
 	xmin(-boundsSizeInRadius*radius, -boundsSizeInRadius*radius, -boundsSizeInRadius*radius),
 	xmax(boundsSizeInRadius*radius, boundsSizeInRadius*radius, boundsSizeInRadius*radius);
 
-const int sizei = 32;
+const int sizei = 16;//32;//128;
 const Vector<int, spatialDim> sizev(sizei, sizei, sizei);
 const int gridVolume = sizev.volume();
 const Vector<real, spatialDim> dx = (xmax - xmin) / sizev;
@@ -236,7 +233,7 @@ void calc_gLLs_and_gUUs(const real* x) {
 		const Tensor<real, Upper<spatialDim>> &betaU = metricPrims.betaU;
 		const Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>> &gammaLL = metricPrims.gammaLL;
 
-		real alpha = metricPrims.alpha;
+		real alpha = exp(metricPrims.ln_alpha);
 		real alphaSq = alpha * alpha;
 
 		Tensor<real, Lower<spatialDim>> betaL;
@@ -451,7 +448,7 @@ void calc_EinsteinLLs(real* y) {
 
 //based on 
 Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_8piTLL(Vector<int,spatialDim> index, const MetricPrims& metricPrims) {
-	real alpha = metricPrims.alpha;
+	real alpha = exp(metricPrims.ln_alpha);
 	real alphaSq = alpha * alpha;
 	const Tensor<real, Upper<spatialDim>> &betaU = metricPrims.betaU;
 	const Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>> &gammaLL = metricPrims.gammaLL;
@@ -644,12 +641,16 @@ void calc_EFE_constraint(real* y, const real* x) {
 
 int main(int argc, char** argv) {
 
+	std::string initCondName = "stellar";
 	int maxiter = std::numeric_limits<int>::max();
 	for (int i = 1; i < argc; ++i) {
 		if (i < argc-1) {
 			if (!strcmp(argv[i], "maxiter")) {
 				++i;
 				maxiter = atoi(argv[i]);
+			} else if (!strcmp(argv[i], "initcond")) {
+				++i;
+				initCondName = argv[i];
 			}
 		}
 	}
@@ -681,72 +682,106 @@ int main(int argc, char** argv) {
 		});
 	});
 
-	//initialize metric primitives
-	time("calculating metric primitives", [&]{
-		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
-			MetricPrims& metricPrims = metricPrimGrid(index);
-			Vector<real, spatialDim> xi = xs(index);
-			real r = Vector<real, spatialDim>::length(xi);
-			real matterRadius = std::min<real>(r, radius);
-			real volumeOfMatterRadius = 4/3*M_PI*matterRadius*matterRadius*matterRadius;
-			real m = density * volumeOfMatterRadius;	// m^3
-
-			//substitute the schwarzschild R for 2 m(r)
-#ifdef INIT_FLAT	//completely flat space
-			metricPrims.alpha = 1;
-			for (int i = 0; i < spatialDim; ++i) {
-				metricPrims.betaU(i) = 0;
-				for (int j = 0; j <= i; ++j) {
-					metricPrims.gammaLL(i,j) = (real)(i == j);
+	{
+		struct {
+			const char* name;
+			std::function<void(Vector<int,spatialDim>)> func;
+		} initConds[] = {
+			{"flat", [&](Vector<int,spatialDim> index){
+				//substitute the schwarzschild R for 2 m(r)
+				MetricPrims& metricPrims = metricPrimGrid(index);
+				metricPrims.ln_alpha = 0;
+				for (int i = 0; i < spatialDim; ++i) {
+					metricPrims.betaU(i) = 0;
+					for (int j = 0; j <= i; ++j) {
+						metricPrims.gammaLL(i,j) = (real)(i == j);
+					}
 				}
-			}
-#endif	//INIT_FLAT
-#ifdef INIT_STELLAR	//schwarzschild metric / stellar model
-			/*
-			g_ti = beta_i = 0
-			g_tt = -alpha^2 + beta^2 = -alpha^2 = -1 + Rs/r <=> alpha = sqrt(1 - Rs/r)
-			g_ij = gamma_ij = delta_ij + x^i x^j / r^2 2M/(r - 2M)		<- but x is upper, and you can't lower it without specifying gamma_ij
-			 ... which might be why the contravariant spatial metrics of spherical and cartesian look so similar 
-			*/
-			/*
-			I'm going by MTW box 23.2 eqn 6 d/dt (proper time) = sqrt(1 - R/r) for r > R
-				and ( 3/2 sqrt(1 - 2 M / R) - 1/2 sqrt(1 - 2 M r^2 / R^3) ) for r < R
-				for M = total mass 
-				and R = planet radius 
-			*/
-			metricPrims.alpha = r > radius 
-				? sqrt(1 - 2*mass/r)
-				: (1.5 * sqrt(1 - 2*mass/radius) - .5 * sqrt(1 - 2*mass*r*r/(radius*radius*radius)));
-			
-			for (int i = 0; i < spatialDim; ++i) {
-				metricPrims.betaU(i) = 0;
-				for (int j = 0; j <= i; ++j) {
-					metricPrims.gammaLL(i,j) = (real)(i == j) + xi(i)/r * xi(j)/r * 2*m/(r - 2*m);
-					/*
-					dr^2's coefficient
-					spherical: 1/(1 - 2M/r) = 1/((r - 2M)/r) = r/(r - 2M)
-					spherical contravariant: 1 - 2M/r
-					cartesian contravariant: delta_ij - x/r y/r 2M/r
-					hmm, contravariant terms of cartesian vs spherical look more similar than covariant terms do
+			}},
+			{"stellar", [&](Vector<int,spatialDim> index){
+				MetricPrims& metricPrims = metricPrimGrid(index);
+				Vector<real, spatialDim> xi = xs(index);
+				real r = Vector<real, spatialDim>::length(xi);
+				real matterRadius = std::min<real>(r, radius);
+				real volumeOfMatterRadius = 4/3*M_PI*matterRadius*matterRadius*matterRadius;
+				real m = density * volumeOfMatterRadius;	// m^3		
 				
-					in the OV metric, dr^2's coefficient is exp(2 Lambda) = 1/(1 - 2 m(r) / r) where m(r) is the enclosing mass
-					so the contravariant coefficient would be exp(-2 Lambda) = 1 - 2 m(r) / r
-					I'm going to do the lazy thing and guess this converts to delta^ij - 2 m(r) x^i x^j / r^3
-					*/
+				/*
+				g_ti = beta_i = 0
+				g_tt = -alpha^2 + beta^2 = -alpha^2 = -1 + Rs/r <=> alpha = sqrt(1 - Rs/r)
+				g_ij = gamma_ij = delta_ij + x^i x^j / r^2 2M/(r - 2M)		<- but x is upper, and you can't lower it without specifying gamma_ij
+				 ... which might be why the contravariant spatial metrics of spherical and cartesian look so similar 
+				*/
+				/*
+				I'm going by MTW box 23.2 eqn 6 d/dt (proper time) = sqrt(1 - R/r) for r > R
+					and ( 3/2 sqrt(1 - 2 M / R) - 1/2 sqrt(1 - 2 M r^2 / R^3) ) for r < R
+					for M = total mass 
+					and R = planet radius 
+				*/
+				metricPrims.ln_alpha = log(r > radius 
+					? sqrt(1 - 2*mass/r)
+					: (1.5 * sqrt(1 - 2*mass/radius) - .5 * sqrt(1 - 2*mass*r*r/(radius*radius*radius)))
+				);
+				
+				for (int i = 0; i < spatialDim; ++i) {
+					metricPrims.betaU(i) = 0;
+					for (int j = 0; j <= i; ++j) {
+						metricPrims.gammaLL(i,j) = (real)(i == j) + xi(i)/r * xi(j)/r * 2*m/(r - 2*m);
+						/*
+						dr^2's coefficient
+						spherical: 1/(1 - 2M/r) = 1/((r - 2M)/r) = r/(r - 2M)
+						spherical contravariant: 1 - 2M/r
+						cartesian contravariant: delta_ij - x/r y/r 2M/r
+						hmm, contravariant terms of cartesian vs spherical look more similar than covariant terms do
+					
+						in the OV metric, dr^2's coefficient is exp(2 Lambda) = 1/(1 - 2 m(r) / r) where m(r) is the enclosing mass
+						so the contravariant coefficient would be exp(-2 Lambda) = 1 - 2 m(r) / r
+						I'm going to do the lazy thing and guess this converts to delta^ij - 2 m(r) x^i x^j / r^3
+						*/
+					}
 				}
+			}},
+		}, *initCond, *p;
+
+		initCond = nullptr;
+		for (p = initConds; p < endof(initConds); ++p) {
+			if (p->name == initCondName) {
+				initCond = p;
+				break;
 			}
-#endif	//INIT_STELLAR
+		}
+		if (!initCond) {
+			throw Common::Exception() << "couldn't find initial condition named " << initCondName;
+		}
+
+		//initialize metric primitives
+		time("calculating metric primitives", [&]{
+			parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
+				initCond->func(index);
+			});
 		});
-	});
+	}
 
 	if (maxiter > 0) {	
+
+//use GMRes and treat G_ab = 8 pi T_ab like a linear system A x = b for x = (alpha, beta, gamma), A x = G_ab(x), and b = 8 pi T_ab ... which is also a function of x ...
+//nothing appears to be moving ...
 #ifdef USE_GMRES
+		
 		time("calculating T_ab", [&]{
 			calc_8piTLLs((real*)metricPrimGrid.v);
 		});
-				
-		Solvers::GMRes<real> gmres(
-			sizeof(MetricPrims) / sizeof(real) * gridVolume,	//n = vector size
+
+		struct GMRes : public Solvers::GMRes<real> {
+			using Solvers::GMRes<real>::GMRes;
+			virtual real calcResidual(real rNormL2, real bNormL2, const real* r) {
+				return Solvers::Vector::normL2(n, r);
+			}
+		};
+		
+		size_t n = sizeof(MetricPrims) / sizeof(real) * gridVolume;
+		GMRes gmres(
+			n,	//n = vector size
 			(real*)metricPrimGrid.v,		//x = state vector
 			(const real*)_8piTLLs.v,		//b = solution vector
 			[&](real* y, const real* x) {	//A = linear function to solve x for A(x) = b
@@ -764,7 +799,7 @@ int main(int argc, char** argv) {
 				});
 				time("calculating G_ab", [&]{
 #endif				
-					calc_EinsteinLLs(y);
+				calc_EinsteinLLs(y);
 #ifdef PRINTTIME
 				});
 				time("calculating T_ab", [&]{
@@ -774,14 +809,21 @@ int main(int argc, char** argv) {
 				calc_8piTLLs(x);
 #ifdef PRINTTIME
 				});
-#endif				
+#endif
 			},
-			1e-7,			//epsilon
+			1e-30,			//epsilon
 			gridVolume,		//maxiter
 			100				//restart
 		);
+		
+		//seems this is stopping too early, so try scaling both x and y ... or at least the normal that is used ...
+		/*gmres.MInv = [&](real* y, const real* x) {
+			for (int i = 0; i < n; ++i) {
+				y[i] = x[i] * c * c;
+			}
+		};*/
 		gmres.stopCallback = [&]()->bool{
-			fprintf(stderr, "gmres iter %d residual %.16f\n", gmres.iter, gmres.residual);
+			fprintf(stderr, "gmres iter %d residual %.49e\n", gmres.iter, gmres.residual);
 			fflush(stderr);
 			return false;
 		};
@@ -789,6 +831,9 @@ int main(int argc, char** argv) {
 			gmres.solve();
 		});
 #endif	//USE_GMRES
+
+//use JFNK
+//as soon as this passes 'restart' it explodes.
 #ifdef USE_JFNK
 		assert(sizeof(MetricPrims) == sizeof(EFEConstraintGrid.v[0]));	//this should be 10 real numbers and nothing else
 		Solvers::JFNK<real> jfnk(
@@ -815,20 +860,37 @@ int main(int argc, char** argv) {
 				});
 #endif
 			},
-			1e-7, //newton stop epsilon
-			maxiter, //newton max iter
-			1e-7, //gmres stop epsilon
+			1e-7, 				//newton stop epsilon
+			maxiter, 			//newton max iter
+			1e-7, 				//gmres stop epsilon
 #if 0	// this is ideal, but impractical with 32^3 data
-			gridVolume * 10, //gmres max iter
-			gridVolume	//gmres restart iter
+			gridVolume * 10, 	//gmres max iter
+			gridVolume			//gmres restart iter
 #endif
 #if 1	//so I'm doing this instead:
-			gridVolume * 10,
-			100
+			gridVolume * 10,	//gmres max maxiter
+			100					//gmres restart iter
 #endif
 		);
-
+		jfnk.lineSearch = &Solvers::JFNK<real>::lineSearch_none;
+		jfnk.maxAlpha = 1e-10;
 		jfnk.stopCallback = [&]()->bool{
+			
+			bool constrained = false;
+			for (MetricPrims* i = metricPrimGrid.v; i != metricPrimGrid.end(); ++i) {
+				if (i->ln_alpha < 0) {
+					i->ln_alpha = 0;
+					constrained = true;
+				}
+			}
+			//if we had to constrain our answer -- then recalculate the residual
+			//TODO split this from residualAtAlpha?
+			if (constrained) {
+				jfnk.F(jfnk.F_of_x, jfnk.x);
+				jfnk.residual = Solvers::Vector<real>::normL2(jfnk.n, jfnk.F_of_x) / (real)jfnk.n;
+				if (jfnk.residual != jfnk.residual) jfnk.residual = std::numeric_limits<real>::max();
+			}
+			
 			fprintf(stderr, "jfnk iter %d alpha %f residual %.16f\n", jfnk.iter, jfnk.alpha, jfnk.residual);
 			fflush(stderr);
 			return false;
@@ -919,7 +981,7 @@ int main(int argc, char** argv) {
 			{"iz", [&](Vector<int,spatialDim> index)->real{ return index(2); }},
 			{"rho", [&](Vector<int,spatialDim> index)->real{ return stressEnergyPrimGrid(index).rho; }},
 			{"det", [&](Vector<int,spatialDim> index)->real{ return -1 + determinant33<real, Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>>>(metricPrimGrid(index).gammaLL); }},
-			{"alpha", [&](Vector<int,spatialDim> index)->real{ return -1 + metricPrimGrid(index).alpha; }},
+			{"ln(alpha)", [&](Vector<int,spatialDim> index)->real{ return metricPrimGrid(index).ln_alpha; }},
 #if 0	//within 1e-23			
 			{"ortho_error", [&](Vector<int,spatialDim> index)->real{
 				const Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> &gLL = gLLs(index);
@@ -952,24 +1014,26 @@ int main(int argc, char** argv) {
 			}},
 		};
 
-		std::cout << "#";
+		printf("#");
 		{
 			const char* tab = "";
 			for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {
-				std::cout << tab << p->name;
+				printf("%s%s", tab, p->name.c_str());
 				tab = "\t";
 			}
 		}
-		std::cout << std::endl;
+		printf("\n");
+		fflush(stdout);
 		time("outputting", [&]{
 			//this is printing output, so don't do it in parallel		
 			for (RangeObj<spatialDim>::iterator iter = range.begin(); iter != range.end(); ++iter) {
 				const char* tab = "";
 				for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {
-					std::cout << tab << p->func(iter.index);
+					printf("%s%.16e", tab, p->func(iter.index));
 					tab = "\t";
 				}
-				std::cout << std::endl;
+				printf("\n");
+				fflush(stdout);
 			}
 		});
 	}

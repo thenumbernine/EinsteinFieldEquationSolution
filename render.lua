@@ -82,7 +82,7 @@ local half = math.floor(self.max[1]/2)
 for i=half,self.max[1] do
 	local index = i + (self.max[1]+1) * (half + (self.max[2]+1) * half) + 1 
 	local pt = self.pts[index]
-	print(pt[1], pt[7])
+	print(pt[1], pt[6])	-- alpha
 end
 --]]
 
@@ -381,7 +381,7 @@ function App:updateGUI()
 	col[0] = col[0] - 4
 	ig.igCombo('column', col, colnames:sub(4))
 	col[0] = col[0] + 4
-	ig.igText(self.min[col[0]]..' to '..self.max[col[0]])
+	ig.igText(('%.3e to %.3e'):format(self.min[col[0]], self.max[col[0]]))
 	
 	local gradImageSize = ig.ImVec2(128, 32)
 	ig.igImage(

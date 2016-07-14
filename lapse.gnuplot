@@ -7,7 +7,7 @@ min(x,y) = (x < y) ? x : y
 c = 299792458.
 G = 6.67384e-11
 # earth parameters:
-#R = 6.37101e6						# matter radius
+#R = 6.37101e+6						# matter radius
 #mass = 5.9736e+24 * G / c / c			# total mass within radius
 #density = mass / sphereVolume(R)	# average density 
 # temp:
@@ -37,3 +37,4 @@ dalpha_dr(r) = r > R ? (M / (r * r * sqrt(1. - 2.*M/r))) : M*r/(R*R*R*sqrt(1. - 
 
 dx = R/1000.
 plot [0:R*10.] alpha(x), dalpha_dr(x), (alpha(x+dx) - alpha(x-dx)) / (2.*dx)
+#plot [0:R*10.] log(alpha(x))

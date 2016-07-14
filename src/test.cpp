@@ -185,7 +185,7 @@ int main() {
 	//earth volume: 1.0832120174985e+21 m^3
 	const real density = mass / volume;	// 1/m^2
 	//earth density: 4.0950296770075e-24 1/m^2
-	const real schwarzschildRadius = 2 * mass;	//8.87157 mm, which is accurate
+	const real schwarzschildRadius = 2 * mass;	//Schwarzschild radius: 8.87157 mm, which is accurate
 
 	//earth magnetic field at surface: .25-.26 gauss
 	const real magneticField = .45 * sqrt(.1 * G) / c;	// 1/m
@@ -366,15 +366,10 @@ int main() {
 	time("calculating metric primitives", [&]{
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 			MetricPrims& metricPrims = metricPrimGrid(index);
-			
 			Vector<real, spatialDim> xi = xs(index);
 			real r = Vector<real, spatialDim>::length(xi);
-			//mass within radius
-			real matterRadius = std::min<real>(r, radius);
-			real volumeOfMatterRadius = 4/3*M_PI*matterRadius*matterRadius*matterRadius;
-			real matterEnclosed = density * volumeOfMatterRadius;
+
 			//substitute the schwarzschild R for 2 m(r)
-			real R = 2 * matterEnclosed;
 #if 0	//completely flat space
 			metricPrims.alpha = 1;
 			for (int i = 0; i < spatialDim; ++i) {
@@ -388,19 +383,28 @@ int main() {
 			/*
 			g_ti = beta_i = 0
 			g_tt = -alpha^2 + beta^2 = -alpha^2 = -1 + Rs/r <=> alpha = sqrt(1 - Rs/r)
-			g_ij = gamma_ij = delta_ij + x^i x^j / r^2 R/(r - R)		<- but x is upper, and you can't lower it without specifying gamma_ij
+			g_ij = gamma_ij = delta_ij + x^i x^j / r^2 2M/(r - 2M)		<- but x is upper, and you can't lower it without specifying gamma_ij
 			 ... which might be why the contravariant spatial metrics of spherical and cartesian look so similar 
 			*/
-			metricPrims.alpha = sqrt(1 - R/r); 
+			/*
+			I'm going by MTW box 23.2 eqn 6 d/dt (proper time) = sqrt(1 - R/r) for r > R
+				and ( 3/2 sqrt(1 - 2 M(r) / R) - 1/2 sqrt(1 - 2 M(r) r^2 / R^3) ) for r < R
+				for M(r) = schwarzschild radius based on matter enclosed within sphere of radius r
+				and R = schwarzschild radius based on total matter 
+			*/
+			metricPrims.alpha = r > radius 
+				? sqrt(1 - 2*mass/r)
+				: (1.5 * sqrt(1 - 2*mass/radius) - .5 * sqrt(1 - 2*mass*r*r/(radius*radius*radius)));
+			
 			for (int i = 0; i < spatialDim; ++i) {
 				metricPrims.betaU(i) = 0;
 				for (int j = 0; j <= i; ++j) {
-					metricPrims.gammaLL(i,j) = (real)(i == j) + xi(i)/r * xi(j)/r * R/(r - R);
+					metricPrims.gammaLL(i,j) = (real)(i == j) + xi(i)/r * xi(j)/r * 2*mass/(r - 2*mass);
 					/*
 					dr^2's coefficient
-					spherical: 1/(1 - R/r) = 1/((r - R)/r) = r/(r - R)
-					spherical contravariant: 1 - R/r
-					cartesian contravariant: delta_ij - x/r y/r R/r
+					spherical: 1/(1 - 2M/r) = 1/((r - 2M)/r) = r/(r - 2M)
+					spherical contravariant: 1 - 2M/r
+					cartesian contravariant: delta_ij - x/r y/r 2M/r
 					hmm, contravariant terms of cartesian vs spherical look more similar than covariant terms do
 				
 					in the OV metric, dr^2's coefficient is exp(2 Lambda) = 1/(1 - 2 m(r) / r) where m(r) is the enclosing mass
@@ -434,7 +438,7 @@ int main() {
 			//Gamma^r_tt = Gamma^i_tt dr/dx^i
 			//r^2 = x^2 + y^2 + z^2
 			//so dr/dx^i = x^i / r
-			numericalGravity(index) = -(GammaULL(1,0,0) * xi(0) / r
+			numericalGravity(index) = (GammaULL(1,0,0) * xi(0) / r
 									+ GammaULL(2,0,0) * xi(1) / r
 									+ GammaULL(3,0,0) * xi(2) / r)
 									* c * c;	//times c twice because of the two timelike components of a^i = Gamma^i_tt
@@ -448,7 +452,7 @@ int main() {
 		});
 	});
 
-	Grid<Tensor<real, Lower<spatialDim>>, spatialDim> analyticalGammaL_tts(sizev);
+	Grid<Tensor<real, Lower<spatialDim>>, spatialDim> analyticalGamma_itts(sizev);
 	Grid<real, spatialDim> analyticalGravity(sizev);
 	time("calculating analytical gravitational force", [&]{
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
@@ -457,47 +461,94 @@ int main() {
 			//substitute the schwarzschild R for 2 m(r)
 			real matterRadius = std::min<real>(r, radius);
 			real volumeOfMatterRadius = 4/3*M_PI*matterRadius*matterRadius*matterRadius;
-			real matterEnclosed = density * volumeOfMatterRadius;	// m^3
-			real R = 2 * matterEnclosed;
+			real m = density * volumeOfMatterRadius;	// m^3
 
-//Gamma_itt
-#if 1	//direct
-			const Tensor<real, Symmetric<Upper<dim>, Upper<dim>>> &gUU = gUUs(index);
-			Tensor<real, Lower<spatialDim>>& GammaL_tt = analyticalGammaL_tts(index);
+			Tensor<real, Lower<spatialDim>> dg_tti;
+#if 0	//(FAILS) numerically calculated
+			const Tensor<real, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>>& dgLLL = dgLLLs(index);
 			for (int i = 0; i < spatialDim; ++i) {
-				GammaL_tt(i) = xi(i) * R / (2 * r * r * r);
+				dg_tti(i) = dgLLL(0,0,i+1);
+			}
+#endif
+#if 0	//(FAILS) in absense of shift, g_tt,i = (-alpha^2),i via finite difference
+		//initial conditions: alpha = sqrt(1 - 2M/r), -alpha^2 = 2M/r-1, so (-alpha^2),i = (2M/r),i = -2M / r^2 * x^i/r = -x^i 2M / r^3 ... which matches the analytical version below
+			for (int i = 0; i < spatialDim; ++i) {
+				Vector<int, spatialDim> ip = index, im = index;
+				ip(i) = std::min<int>(ip(i)+1, sizev(i)-1);
+				im(i) = std::max<int>(im(i)-1, 0);
+				real alpha_p = metricPrimGrid(ip).alpha;
+				real alpha_m = metricPrimGrid(im).alpha;
+				dg_tti(i) = ((-alpha_p*alpha_p) - (-alpha_m*alpha_m)) / (2 * dx(i));
+			}
+#endif
+#if 0	//(FAILS)  g_tt,i = -2 alpha * alpha,i
+			for (int i = 0; i < spatialDim; ++i) {
+				Vector<int, spatialDim> ip = index, im = index;
+				ip(i) = std::min<int>(ip(i)+1, sizev(i)-1);
+				im(i) = std::max<int>(im(i)-1, 0);
+				real alpha = metricPrimGrid(index).alpha;
+				real alpha_p = metricPrimGrid(ip).alpha;
+				real alpha_m = metricPrimGrid(im).alpha;
+				dg_tti(i) = -2 * alpha * (alpha_p - alpha_m) / (2 * dx(i));
+			}
+#endif
+#if 1		//(WORKS) g_tt,i = -2 alpha alpha,i = -2 alpha sqrt(1-2M/r),i = -2 alpha * 1/2 1/sqrt(1-2M/r) * 2M/r^2 x^i/r = -x^i 2M / r^3
+			for (int i = 0; i < spatialDim; ++i) {
+				real alpha = metricPrimGrid(index).alpha;
+				dg_tti(i) = -2 * alpha * .5 / alpha * xi(i) * 2*mass / (r * r * r);	//which is really a quick simplification away from the direct analytical answer below, which works
+			}
+#endif
+//... so what is wrong with alpha,i?
+//alpha,i = sqrt(1-2M/r),i = 1/2 1/sqrt(1-2M/r) 2M/r^2 x^i/r = x^i 2M / (2 alpha r^3)
+#if 0	//(WORKS) direct
+			for (int i = 0; i < spatialDim; ++i) {
+				dg_tti(i) = -xi(i) * 2*m / (r * r * r);
 			}
 #endif
 
-//Gamma^i_tt:
+			Tensor<real, Lower<spatialDim>>& Gamma_itt = analyticalGamma_itts(index);
+#if 1	//derived from -1/2 g_tt,i = -1/2 (-alpha^2),i = alpha alpha_,i.  when beta^i = 0 then only alpha affects Gamma^i_tt, which is gravity
+			for (int i = 0; i < spatialDim; ++i) {
+				Gamma_itt(i) = -.5 * dg_tti(i);
+			}
+#endif
+#if 0	//(WORKS) direct
+			for (int i = 0; i < spatialDim; ++i) {
+				Gamma_itt(i) = xi(i) * 2*m / (2 * r * r * r);
+			}
+#endif
+
+			Tensor<real, Upper<spatialDim>> GammaUi_tt;
 #if 1	//derived from g^ij and Gamma_itt
-			Tensor<real, Upper<spatialDim>> GammaU_tt;
+			const Tensor<real, Symmetric<Upper<dim>, Upper<dim>>> &gUU = gUUs(index);
 			for (int i = 0; i < spatialDim; ++i) {
 				real sum = 0;
 				for (int j = 0; j < spatialDim; ++j) {	//assuming Gamma_ttt = 0, so don't bother add it or g^it
-					sum += gUU(i+1,j+1) * GammaL_tt(j); 
+					sum += gUU(i+1,j+1) * Gamma_itt(j); 
 				}
-				GammaU_tt(i) = sum;
+				GammaUi_tt(i) = sum;
 			}
 #endif
-#if 0	//direct
-			Tensor<real, Upper<spatialDim>> GammaU_tt;
+#if 0	//(WORKS) direct
 			for (int i = 0; i < spatialDim; ++i) {
-				GammaUx_tt(i) = R * (r - R) * xi(i) / (2 * r * r * r * r);
+				GammaUx_tt(i) = 2*m * (r - 2*m) * xi(i) / (2 * r * r * r * r);
 			}
 #endif
 
 //Gamma^r_tt:
-#if 1	//derived from Gamma^i_tt
+#if 0	//derived from Gamma^i_tt
 			real GammaUr_tt = 0;
 			for (int i = 0; i < spatialDim; ++i) {
-				GammaUr_tt += GammaU_tt(i) * xi(i) / r;
+				GammaUr_tt += GammaUi_tt(i) * xi(i) / r;
 			}
 			GammaUr_tt *= c * c;	//convert from m^3 to m/s^2
 #endif
-#if 0	//direct
-			real GammaUr_tt = R * (r - R) / (2 * r * r * r) * c * c;	//+9 at earth surface
+#if 1	//direct
+			real dR_dr = r > radius ? 0 : (2. * density * 4. * M_PI * r * r);	//enclosed matter derivative
+			real GammaUr_tt = (2*m * (r - 2*m) + dR_dr * r * (2*m - r)) / (2 * r * r * r)
+				* c * c;	//+9 at earth surface, without matter derivatives
 #endif
+			//acceleration is -Gamma^r_tt along the radial direction (i.e. upwards from the surface), or Gamma^r_tt downward into the surface
 			analyticalGravity(index) = GammaUr_tt;
 		});
 	});
@@ -514,6 +565,27 @@ int main() {
 			{"rho", [&](Vector<int,spatialDim> index)->real{ return stressEnergyPrimGrid(index).rho; }},
 			{"det", [&](Vector<int,spatialDim> index)->real{ return -1 + determinant33<real, Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>>>(metricPrimGrid(index).gammaLL); }},
 			{"alpha", [&](Vector<int,spatialDim> index)->real{ return -1 + metricPrimGrid(index).alpha; }},
+#if 1
+			{"numerical-alpha_,x", [&](Vector<int,spatialDim> index)->real{
+				int i = 0;
+				Vector<int, spatialDim> ip = index, im = index;
+				ip(i) = std::min<int>(ip(i)+1, sizev(i)-1);
+				im(i) = std::max<int>(im(i)-1, 0);
+				real alpha = metricPrimGrid(index).alpha;
+				real alpha_p = metricPrimGrid(ip).alpha;
+				real alpha_m = metricPrimGrid(im).alpha;
+				return (alpha_p - alpha_m) / (2 * dx(i)) * c * c;
+			}},
+			{"analytical-alpha_,x", [&](Vector<int,spatialDim> index)->real{
+				int i = 0;
+				Vector<real, spatialDim> xi = xs(index);
+				real r = Vector<real, spatialDim>::length(xi);
+				real matterRadius = std::min<real>(r, radius);
+				real volumeOfMatterRadius = 4/3*M_PI*matterRadius*matterRadius*matterRadius;
+				real m = density * volumeOfMatterRadius;	// m^3
+				return xi(i) * m / (metricPrimGrid(index).alpha * r * r * r) * c * c;
+			}},
+#endif
 #if 0	//within 1e-23			
 			{"ortho_error", [&](Vector<int,spatialDim> index)->real{
 				const Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> &gLL = gLLs(index);
@@ -537,11 +609,11 @@ int main() {
 #endif
 #if 0		// numerical Gamma_itt is about double what analytical Gamma_itt is ... 
 			{"Gamma_xtt", [&](Vector<int,spatialDim> index)->real{ return GammaLLLs(index)(1,0,0) * c * c; }},
-			{"analyticalGamma_xtt", [&](Vector<int,spatialDim> index)->real{ return analyticalGammaL_tts(index)(0) * c * c; }},
+			{"analyticalGamma_xtt", [&](Vector<int,spatialDim> index)->real{ return analyticalGamma_itts(index)(0) * c * c; }},
 			{"Gamma_ytt", [&](Vector<int,spatialDim> index)->real{ return GammaLLLs(index)(2,0,0) * c * c; }},
-			{"analyticalGamma_ytt", [&](Vector<int,spatialDim> index)->real{ return analyticalGammaL_tts(index)(1) * c * c; }},
+			{"analyticalGamma_ytt", [&](Vector<int,spatialDim> index)->real{ return analyticalGamma_itts(index)(1) * c * c; }},
 			{"Gamma_ztt", [&](Vector<int,spatialDim> index)->real{ return GammaLLLs(index)(3,0,0) * c * c; }},
-			{"analyticalGamma_ztt", [&](Vector<int,spatialDim> index)->real{ return analyticalGammaL_tts(index)(2) * c * c; }},
+			{"analyticalGamma_ztt", [&](Vector<int,spatialDim> index)->real{ return analyticalGamma_itts(index)(2) * c * c; }},
 #endif
 		};
 
@@ -560,26 +632,25 @@ int main() {
 							real r = Vector<real, spatialDim>::length(xi);
 							real matterRadius = std::min<real>(r, radius);
 							real volumeOfMatterRadius = 4/3*M_PI*matterRadius*matterRadius*matterRadius;
-							real matterEnclosed = density * volumeOfMatterRadius;	// m^3
-							real R = 2 * matterEnclosed;
+							real m = density * volumeOfMatterRadius;	// m^3
 							if (u == 0) {
 								if (v == 0) {
 									if (w > 0) {
-										return -xi(w-1) * R / (r * r * r)
+										return -xi(w-1) * 2*m / (r * r * r)
 										* c * c;
 									}
 								}
 							} else {
 								if (v > 0) {
 									if (w > 0) {
-										//g_ij = delta_ij + R x^i x^j / (r^2 (r - R))
-										//g_ij,k = R ((delta_ik x^j + delta_jk x^i) r^2 (r - R) + x^i x^j (r^2 (r - R)),k)  / (r^2 (r - R))^2
+										//g_ij = delta_ij + 2M x^i x^j / (r^2 (r - 2M))
+										//g_ij,k = 2M ((delta_ik x^j + delta_jk x^i) r^2 (r - 2M) + x^i x^j (r^2 (r - 2M)),k)  / (r^2 (r - 2M))^2
 										//note this assumes R_,i = 0, when in reality it's only 0 outside the planet
 										//maybe that is my discrepancy?
-										return (R * (
-											((u == w) * xi(v-1) + (v == w) * xi(u-1)) * r * r * (r - R)
-											+ xi(u-1) * xi(v-1) * (2 * xi(w-1) * (r - R) + r * xi(w-1))
-										) / ((r * r * (r - R)) * (r * r * (r - R)))
+										return (2*m * (
+											((u == w) * xi(v-1) + (v == w) * xi(u-1)) * r * r * (r - 2*m)
+											+ xi(u-1) * xi(v-1) * (2 * xi(w-1) * (r - 2*m) + r * xi(w-1))
+										) / ((r * r * (r - 2*m)) * (r * r * (r - 2*m)))
 										) * c * c;
 									}
 								}

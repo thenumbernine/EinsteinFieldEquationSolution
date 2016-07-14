@@ -161,7 +161,7 @@ const real volume = 4/3*M_PI*radius*radius*radius;	// m^3
 //earth volume: 1.0832120174985e+21 m^3
 const real density = mass / volume;	// 1/m^2
 //earth density: 4.0950296770075e-24 1/m^2
-const real schwarzschildRadius = 2 * mass;	//Schwarzschild radius: 8.87157 mm, which is accurate
+//const real schwarzschildRadius = 2 * mass;	//Schwarzschild radius: 8.87157 mm, which is accurate
 
 //earth magnetic field at surface: .25-.26 gauss
 const real magneticField = .45 * sqrt(.1 * G) / c;	// 1/m
@@ -172,7 +172,7 @@ Vector<real, spatialDim>
 	xmin(-boundsSizeInRadius*radius, -boundsSizeInRadius*radius, -boundsSizeInRadius*radius),
 	xmax(boundsSizeInRadius*radius, boundsSizeInRadius*radius, boundsSizeInRadius*radius);
 
-const int sizei = 128;
+const int sizei = 32;
 const Vector<int, spatialDim> sizev(sizei, sizei, sizei);
 const int gridVolume = sizev.volume();
 const Vector<real, spatialDim> dx = (xmax - xmin) / sizev;
@@ -586,8 +586,13 @@ Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_8piTLL(Vector<int,spatialDi
 	}
 	
 	//total stress-energy	
-	Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> T_LL = T_EM_LL + T_matter_LL;
-	return T_LL * (8 * M_PI);
+	Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> T_LL;
+	for (int a = 0; a < dim; ++a) {
+		for (int b = 0; b <= a; ++b) {
+			T_LL(a,b) = (T_EM_LL(a,b) + T_matter_LL(a,b)) * 8 * M_PI;
+		}
+	}
+	return T_LL;
 }
 
 #ifdef USE_GMRES
@@ -943,7 +948,7 @@ int main(int argc, char** argv) {
 						sum += fabs(EFEConstraintGrid(index)(a,b));
 					}
 				}
-				return sum * c * c * c;
+				return sum * c * c;
 			}},
 		};
 

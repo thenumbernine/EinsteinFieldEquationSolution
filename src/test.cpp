@@ -14,9 +14,6 @@ might get into trouble ensuring the hamiltonian or momentum constraints are fulf
 #include <functional>
 #include <chrono>
 
-#define USE_JFNK	//use JFNK to solve
-//#define USE_GMRES	//use GMRes Ax=b for x = (alpha, beta^i, gamma_ij), A(x) = G_ab, and b = 8 pi T_ab ... but T_ab is based on metric prims as well, so keep updating them ...
-
 Parallel::Parallel parallel(8);
 
 void time(const std::string name, std::function<void()> f) {
@@ -185,9 +182,6 @@ Grid<Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> EFEConstraintG
 Grid<Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> gLLs;
 Grid<Tensor<real, Symmetric<Upper<dim>, Upper<dim>>>, spatialDim> gUUs;
 Grid<Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> GammaULLs;
-#ifdef USE_GMRES
-Grid<Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> _8piTLLs;	//used by GMRes-only solver
-#endif	//USE_GMRES
 
 template<typename CellType>
 void allocateGrid(Grid<CellType, spatialDim>& grid, std::string name, Vector<int, spatialDim> sizev, size_t& totalSize) {
@@ -207,9 +201,6 @@ void allocateGrids(Vector<int, spatialDim> sizev) {
 	allocateGrid(gLLs, "gLLs", sizev, totalSize);
 	allocateGrid(gUUs, "gUUs", sizev, totalSize);
 	allocateGrid(GammaULLs, "GammaULLs", sizev, totalSize);
-#ifdef USE_GMRES
-	allocateGrid(_8piTLLs, "_8piTLLs", sizev, totalSize);
-#endif	//USE_GMRES
 }
 
 Vector<int, spatialDim> prev(Vector<int, spatialDim> v, int i) {
@@ -592,19 +583,6 @@ Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_8piTLL(Vector<int,spatialDi
 	return T_LL;
 }
 
-#ifdef USE_GMRES
-//calls calc_8piTLL
-//based on x which holds the metricPrims
-//stores in _8piTLLs
-void calc_8piTLLs(const real* x) {
-	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
-		int offset = Vector<int, spatialDim>::dot(metricPrimGrid.step, index);
-		const MetricPrims &metricPrims = *((const MetricPrims*)x + offset);
-		_8piTLLs(index) = calc_8piTLL(index, metricPrims);
-	});
-}
-#endif	//USE_GMRES
-
 void calc_EFE_constraint(real* y, const real* x) {
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 
@@ -639,9 +617,187 @@ void calc_EFE_constraint(real* y, const real* x) {
 	});
 }
 
+struct EFESolver {
+	int maxiter;
+	EFESolver(int maxiter_) : maxiter(maxiter_) {}
+	virtual void solve() = 0;
+};
+
+//use GMRes and treat G_ab = 8 pi T_ab like a linear system A x = b for x = (alpha, beta, gamma), A x = G_ab(x), and b = 8 pi T_ab ... which is also a function of x ...
+//nothing appears to be moving ...
+struct GMResSolver : public EFESolver {
+	typedef EFESolver Super;
+	using Super::Super;
+	
+	Grid<Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> _8piTLLs;
+	
+	GMResSolver(int maxiter)
+	: Super(maxiter)
+	, _8piTLLs(sizev)
+	{}
+	
+	//calls calc_8piTLL
+	//based on x which holds the metricPrims
+	//stores in _8piTLLs
+	void calc_8piTLLs(const real* x) {
+		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
+			int offset = Vector<int, spatialDim>::dot(metricPrimGrid.step, index);
+			const MetricPrims &metricPrims = *((const MetricPrims*)x + offset);
+			_8piTLLs(index) = calc_8piTLL(index, metricPrims);
+		});
+	}
+	
+	virtual void solve() {
+
+		time("calculating T_ab", [&]{
+			calc_8piTLLs((real*)metricPrimGrid.v);
+		});
+
+		struct GMRes : public Solvers::GMRes<real> {
+			using Solvers::GMRes<real>::GMRes;
+			virtual real calcResidual(real rNormL2, real bNormL2, const real* r) {
+				return Solvers::Vector<real>::normL2(n, r);
+			}
+		};
+		
+		size_t n = sizeof(MetricPrims) / sizeof(real) * gridVolume;
+		GMRes gmres(
+			n,	//n = vector size
+			(real*)metricPrimGrid.v,		//x = state vector
+			(const real*)_8piTLLs.v,		//b = solution vector
+			[&](real* y, const real* x) {	//A = linear function to solve x for A(x) = b
+#ifdef PRINTTIME
+				std::cerr << "iteration " << jfnk.iter << std::endl;
+				time("calculating g_ab and g^ab", [&](){
+#endif				
+				calc_gLLs_and_gUUs(x);
+#ifdef PRINTTIME
+				});
+				time("calculating Gamma^a_bc", [&](){
+#endif				
+				calc_GammaULLs();
+#ifdef PRINTTIME
+				});
+				time("calculating G_ab", [&]{
+#endif				
+				calc_EinsteinLLs(y);
+#ifdef PRINTTIME
+				});
+				time("calculating T_ab", [&]{
+#endif				
+				//here's me abusing GMRes.
+				//I'm updating the 'b' vector mid-algorithm since it is dependent on the 'x' vector
+				calc_8piTLLs(x);
+#ifdef PRINTTIME
+				});
+#endif
+			},
+			1e-30,			//epsilon
+			gridVolume,		//maxiter
+			100				//restart
+		);
+		
+		//seems this is stopping too early, so try scaling both x and y ... or at least the normal that is used ...
+		/*gmres.MInv = [&](real* y, const real* x) {
+			for (int i = 0; i < n; ++i) {
+				y[i] = x[i] * c * c;
+			}
+		};*/
+		gmres.stopCallback = [&]()->bool{
+			fprintf(stderr, "gmres iter %d residual %.49e\n", gmres.iter, gmres.residual);
+			fflush(stderr);
+			return false;
+		};
+		time("solving", [&](){
+			gmres.solve();
+		});
+
+	}
+};
+
+//use JFNK
+//as soon as this passes 'restart' it explodes.
+struct JFNKSolver : public EFESolver {
+	typedef EFESolver Super;
+	using Super::Super;
+	
+	virtual void solve() {
+		assert(sizeof(MetricPrims) == sizeof(EFEConstraintGrid.v[0]));	//this should be 10 real numbers and nothing else
+		Solvers::JFNK<real> jfnk(
+			sizeof(MetricPrims) / sizeof(real) * gridVolume,	//n = vector size
+			(real*)metricPrimGrid.v,	//x = state vector
+			[&](real* y, const real* x) {	//A = vector function to minimize
+
+#ifdef PRINTTIME
+				std::cerr << "iteration " << jfnk.iter << std::endl;
+				time("calculating g_ab and g^ab", [&](){
+#endif				
+				calc_gLLs_and_gUUs(x);
+#ifdef PRINTTIME
+				});
+				time("calculating Gamma^a_bc", [&](){
+#endif				
+				calc_GammaULLs();
+#ifdef PRINTTIME
+				});
+				time("calculating G_ab = 8 pi T_ab", [&]{
+#endif				
+				calc_EFE_constraint(y, x);	//EFEConstraintGrid, metricPrimGrid
+#ifdef PRINTTIME
+				});
+#endif
+			},
+			1e-7, 				//newton stop epsilon
+			maxiter, 			//newton max iter
+			1e-7, 				//gmres stop epsilon
+#if 0	// this is ideal, but impractical with 32^3 data
+			gridVolume * 10, 	//gmres max iter
+			gridVolume			//gmres restart iter
+#endif
+#if 1	//so I'm doing this instead:
+			gridVolume * 10,	//gmres max maxiter
+			100					//gmres restart iter
+#endif
+		);
+		jfnk.lineSearch = &Solvers::JFNK<real>::lineSearch_none;
+		jfnk.maxAlpha = 1e-10;
+		jfnk.stopCallback = [&]()->bool{
+			
+			bool constrained = false;
+			for (MetricPrims* i = metricPrimGrid.v; i != metricPrimGrid.end(); ++i) {
+				if (i->ln_alpha < 0) {
+					i->ln_alpha = 0;
+					constrained = true;
+				}
+			}
+			//if we had to constrain our answer -- then recalculate the residual
+			//TODO split this from residualAtAlpha?
+			if (constrained) {
+				jfnk.F(jfnk.F_of_x, jfnk.x);
+				jfnk.residual = Solvers::Vector<real>::normL2(jfnk.n, jfnk.F_of_x) / (real)jfnk.n;
+				if (jfnk.residual != jfnk.residual) jfnk.residual = std::numeric_limits<real>::max();
+			}
+			
+			fprintf(stderr, "jfnk iter %d alpha %f residual %.16f\n", jfnk.iter, jfnk.alpha, jfnk.residual);
+			fflush(stderr);
+			return false;
+		};
+		jfnk.gmres.stopCallback = [&]()->bool{
+			fprintf(stderr, "gmres iter %d residual %.16f\n", jfnk.gmres.iter, jfnk.gmres.residual);
+			fflush(stderr);
+			return false;
+		};
+		
+		time("solving", [&](){
+			jfnk.solve();
+		});
+	}
+};
+
 int main(int argc, char** argv) {
 
 	std::string initCondName = "stellar";
+	std::string solverName = "jfnk";
 	int maxiter = std::numeric_limits<int>::max();
 	for (int i = 1; i < argc; ++i) {
 		if (i < argc-1) {
@@ -651,6 +807,9 @@ int main(int argc, char** argv) {
 			} else if (!strcmp(argv[i], "initcond")) {
 				++i;
 				initCondName = argv[i];
+			} else if (!strcmp(argv[i], "solver")) {
+				++i;
+				solverName = argv[i];
 			}
 		}
 	}
@@ -741,12 +900,12 @@ int main(int argc, char** argv) {
 					}
 				}
 			}},
-		}, *initCond, *p;
+		}, *p;
 
-		initCond = nullptr;
+		std::function<void(Vector<int,spatialDim>)> initCond;
 		for (p = initConds; p < endof(initConds); ++p) {
 			if (p->name == initCondName) {
-				initCond = p;
+				initCond = p->func;
 				break;
 			}
 		}
@@ -757,155 +916,31 @@ int main(int argc, char** argv) {
 		//initialize metric primitives
 		time("calculating metric primitives", [&]{
 			parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
-				initCond->func(index);
+				initCond(index);
 			});
 		});
 	}
 
-	if (maxiter > 0) {	
-
-//use GMRes and treat G_ab = 8 pi T_ab like a linear system A x = b for x = (alpha, beta, gamma), A x = G_ab(x), and b = 8 pi T_ab ... which is also a function of x ...
-//nothing appears to be moving ...
-#ifdef USE_GMRES
-		
-		time("calculating T_ab", [&]{
-			calc_8piTLLs((real*)metricPrimGrid.v);
-		});
-
-		struct GMRes : public Solvers::GMRes<real> {
-			using Solvers::GMRes<real>::GMRes;
-			virtual real calcResidual(real rNormL2, real bNormL2, const real* r) {
-				return Solvers::Vector::normL2(n, r);
+	std::shared_ptr<EFESolver> solver;
+	{
+		struct {
+			const char* name;
+			std::function<std::shared_ptr<EFESolver>()> func;
+		} solvers[] = {
+			{"gmres", [&](){ return std::make_shared<GMResSolver>(maxiter); }},
+			{"jfnk", [&](){ return std::make_shared<JFNKSolver>(maxiter); }},
+		}, *p;
+		for (p = solvers; p < endof(solvers); ++p) {
+			if (p->name == solverName) {
+				solver = p->func();
 			}
-		};
-		
-		size_t n = sizeof(MetricPrims) / sizeof(real) * gridVolume;
-		GMRes gmres(
-			n,	//n = vector size
-			(real*)metricPrimGrid.v,		//x = state vector
-			(const real*)_8piTLLs.v,		//b = solution vector
-			[&](real* y, const real* x) {	//A = linear function to solve x for A(x) = b
-#ifdef PRINTTIME
-				std::cerr << "iteration " << jfnk.iter << std::endl;
-				time("calculating g_ab and g^ab", [&](){
-#endif				
-				calc_gLLs_and_gUUs(x);
-#ifdef PRINTTIME
-				});
-				time("calculating Gamma^a_bc", [&](){
-#endif				
-				calc_GammaULLs();
-#ifdef PRINTTIME
-				});
-				time("calculating G_ab", [&]{
-#endif				
-				calc_EinsteinLLs(y);
-#ifdef PRINTTIME
-				});
-				time("calculating T_ab", [&]{
-#endif				
-				//here's me abusing GMRes.
-				//I'm updating the 'b' vector mid-algorithm since it is dependent on the 'x' vector
-				calc_8piTLLs(x);
-#ifdef PRINTTIME
-				});
-#endif
-			},
-			1e-30,			//epsilon
-			gridVolume,		//maxiter
-			100				//restart
-		);
-		
-		//seems this is stopping too early, so try scaling both x and y ... or at least the normal that is used ...
-		/*gmres.MInv = [&](real* y, const real* x) {
-			for (int i = 0; i < n; ++i) {
-				y[i] = x[i] * c * c;
-			}
-		};*/
-		gmres.stopCallback = [&]()->bool{
-			fprintf(stderr, "gmres iter %d residual %.49e\n", gmres.iter, gmres.residual);
-			fflush(stderr);
-			return false;
-		};
-		time("solving", [&](){
-			gmres.solve();
-		});
-#endif	//USE_GMRES
-
-//use JFNK
-//as soon as this passes 'restart' it explodes.
-#ifdef USE_JFNK
-		assert(sizeof(MetricPrims) == sizeof(EFEConstraintGrid.v[0]));	//this should be 10 real numbers and nothing else
-		Solvers::JFNK<real> jfnk(
-			sizeof(MetricPrims) / sizeof(real) * gridVolume,	//n = vector size
-			(real*)metricPrimGrid.v,	//x = state vector
-			[&](real* y, const real* x) {	//A = vector function to minimize
-
-#ifdef PRINTTIME
-				std::cerr << "iteration " << jfnk.iter << std::endl;
-				time("calculating g_ab and g^ab", [&](){
-#endif				
-				calc_gLLs_and_gUUs(x);
-#ifdef PRINTTIME
-				});
-				time("calculating Gamma^a_bc", [&](){
-#endif				
-				calc_GammaULLs();
-#ifdef PRINTTIME
-				});
-				time("calculating G_ab = 8 pi T_ab", [&]{
-#endif				
-				calc_EFE_constraint(y, x);	//EFEConstraintGrid, metricPrimGrid
-#ifdef PRINTTIME
-				});
-#endif
-			},
-			1e-7, 				//newton stop epsilon
-			maxiter, 			//newton max iter
-			1e-7, 				//gmres stop epsilon
-#if 0	// this is ideal, but impractical with 32^3 data
-			gridVolume * 10, 	//gmres max iter
-			gridVolume			//gmres restart iter
-#endif
-#if 1	//so I'm doing this instead:
-			gridVolume * 10,	//gmres max maxiter
-			100					//gmres restart iter
-#endif
-		);
-		jfnk.lineSearch = &Solvers::JFNK<real>::lineSearch_none;
-		jfnk.maxAlpha = 1e-10;
-		jfnk.stopCallback = [&]()->bool{
-			
-			bool constrained = false;
-			for (MetricPrims* i = metricPrimGrid.v; i != metricPrimGrid.end(); ++i) {
-				if (i->ln_alpha < 0) {
-					i->ln_alpha = 0;
-					constrained = true;
-				}
-			}
-			//if we had to constrain our answer -- then recalculate the residual
-			//TODO split this from residualAtAlpha?
-			if (constrained) {
-				jfnk.F(jfnk.F_of_x, jfnk.x);
-				jfnk.residual = Solvers::Vector<real>::normL2(jfnk.n, jfnk.F_of_x) / (real)jfnk.n;
-				if (jfnk.residual != jfnk.residual) jfnk.residual = std::numeric_limits<real>::max();
-			}
-			
-			fprintf(stderr, "jfnk iter %d alpha %f residual %.16f\n", jfnk.iter, jfnk.alpha, jfnk.residual);
-			fflush(stderr);
-			return false;
-		};
-		jfnk.gmres.stopCallback = [&]()->bool{
-			fprintf(stderr, "gmres iter %d residual %.16f\n", jfnk.gmres.iter, jfnk.gmres.residual);
-			fflush(stderr);
-			return false;
-		};
-		
-		time("solving", [&](){
-			jfnk.solve();
-		});
-#endif	//USE_JFNK
+		}
+		if (!solver) {
+			throw Common::Exception() << "couldn't find solver named " << solverName;
+		}
 	}
+
+	if (maxiter > 0) solver->solve();
 
 	//once all is solved for, do some final calculations ...
 

@@ -177,18 +177,27 @@ void main() {
 varying vec3 pos;
 uniform sampler3D volTex;
 uniform sampler2D hsvTex;
+uniform vec3 normal;
 uniform float alpha;
 uniform float alphaGamma;
 void main() {
+	
 	float value = texture3D(volTex, pos).r;
 	vec4 voxelColor = vec4(texture2D(hsvTex, vec2(value, .5)).rgb, pow(alpha, alphaGamma));
+	
+	//calculate normal in screen coordinates
+	vec4 n = gl_ModelViewProjectionMatrix * vec4(normal, 0.);
+	//determine length of line through slice at its angle
+	voxelColor.a /= -n.w;
+	
 	gl_FragColor = vec4(voxelColor.rgb, voxelColor.a * alpha);
 }
 ]],
 		uniforms = {
 			'volTex',
-			'alpha',
 			'hsvTex',
+			'normal',
+			'alpha',
 			'alphaGamma',
 		},
 	}
@@ -325,13 +334,15 @@ function App:update()
 	local fwd = -viewAngle:zAxis()
 	local fwddir = select(2, table(fwd):map(math.abs):sup())
 	local quad = {{0,0},{1,0},{1,1},{0,1}}
-	gl.glBegin(gl.GL_QUADS)
 	local jmin, jmax, jdir
 	if fwd[fwddir] < 0 then
 		jmin, jmax, jdir = 0, n, 1
 	else
 		jmin, jmax, jdir = n, 0, -1
 	end
+	gl.glUniform3f(volumeShader.uniforms.normal, fwddir==1 and jdir or 0, fwddir==2 and jdir or 0, fwddir==3 and jdir or 0)
+	
+	gl.glBegin(gl.GL_QUADS)
 	for j=jmin,jmax,jdir do
 		local f = j/n
 		for _,vtx in ipairs(quad) do
@@ -371,9 +382,24 @@ function App:updateGUI()
 	ig.igCombo('column', col, colnames:sub(4))
 	col[0] = col[0] + 4
 	ig.igText(self.min[col[0]]..' to '..self.max[col[0]])
+	
+	local gradImageSize = ig.ImVec2(128, 32)
 	ig.igImage(
 		ffi.cast('void*',ffi.cast('intptr_t',hsvTex.id)),
-		ig.ImVec2(128, 32))
+		gradImageSize)
+	local gradScreenPos = ig.igGetCursorScreenPos()
+	local mousePos = ig.igGetMousePos()
+	local cursorX = mousePos.x - gradScreenPos.x
+	local cursorY = gradScreenPos.y - mousePos.y
+	if cursorX >= 0 and cursorX <= gradImageSize.x
+	and cursorY >= 0 and cursorY <= gradImageSize.y
+	then
+		local frac = cursorX / gradImageSize.x
+		ig.igBeginTooltip()
+		ig.igText(tostring( self.min[col[0]] * (1-frac) + self.max[col[0]] * frac ))
+		ig.igEndTooltip()
+	end
+	
 	ig.igSliderFloat('alpha', alpha, 0, 1, '%.3e', 10)
 	ig.igSliderFloat('gamma', alphaGamma, 0, 1000, '%.3e', 10)
 	ig.igRadioButton("rotate camera", rotateClip, 0)

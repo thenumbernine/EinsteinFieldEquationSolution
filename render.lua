@@ -77,12 +77,14 @@ function App:initGL()
 		end
 	end
 
+--[[
 local half = math.floor(self.max[1]/2)
 for i=half,self.max[1] do
 	local index = i + (self.max[1]+1) * (half + (self.max[2]+1) * half) + 1 
 	local pt = self.pts[index]
 	print(pt[1], pt[7])
 end
+--]]
 
 	-- this assumes our points are sequential (and that they are power-of-two?)
 	local data = ffi.new('unsigned char[?]', #self.pts*4)

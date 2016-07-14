@@ -388,9 +388,9 @@ int main() {
 			*/
 			/*
 			I'm going by MTW box 23.2 eqn 6 d/dt (proper time) = sqrt(1 - R/r) for r > R
-				and ( 3/2 sqrt(1 - 2 M(r) / R) - 1/2 sqrt(1 - 2 M(r) r^2 / R^3) ) for r < R
-				for M(r) = schwarzschild radius based on matter enclosed within sphere of radius r
-				and R = schwarzschild radius based on total matter 
+				and ( 3/2 sqrt(1 - 2 M / R) - 1/2 sqrt(1 - 2 M r^2 / R^3) ) for r < R
+				for M = total mass 
+				and R = planet radius 
 			*/
 			metricPrims.alpha = r > radius 
 				? sqrt(1 - 2*mass/r)

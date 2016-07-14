@@ -33,7 +33,7 @@ M = m(R)
 alpha(r) = r > R ? sqrt(1. - 2.*M/r) : (1.5*sqrt(1. - 2.*M/R) - .5*sqrt(1. - 2.*M*r*r/(R*R*R)))
 
 # derivative of lapse wrt radius
-dalpha(r) = r > R ? (M / (r * r * sqrt(1. - 2.*M/r))) : 0
+dalpha_dr(r) = r > R ? (M / (r * r * sqrt(1. - 2.*M/r))) : M*r/(R*R*R*sqrt(1. - 2.*M*r*r/(R*R*R)))
 
 dx = R/1000.
-plot [0:R*10.] alpha(x), dalpha(x), (alpha(x+dx) - alpha(x-dx)) / (2.*dx)
+plot [0:R*10.] alpha(x), dalpha_dr(x), (alpha(x+dx) - alpha(x-dx)) / (2.*dx)

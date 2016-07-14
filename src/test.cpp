@@ -7,6 +7,9 @@ might get into trouble ensuring the hamiltonian or momentum constraints are fulf
 #include "Tensor/Grid.h"
 #include "Tensor/Inverse.h"
 #include "Tensor/Derivative.h"
+#include "Solvers/ConjGrad.h"
+#include "Solvers/ConjRes.h"
+#include "Solvers/GMRes.h"
 #include "Solvers/JFNK.h"
 #include "Parallel/Parallel.h"
 #include "Common/Exception.h"
@@ -620,22 +623,26 @@ void calc_EFE_constraint(real* y, const real* x) {
 struct EFESolver {
 	int maxiter;
 	EFESolver(int maxiter_) : maxiter(maxiter_) {}
+	size_t getN() { return sizeof(MetricPrims) / sizeof(real) * gridVolume; }
 	virtual void solve() = 0;
 };
 
-//use GMRes and treat G_ab = 8 pi T_ab like a linear system A x = b for x = (alpha, beta, gamma), A x = G_ab(x), and b = 8 pi T_ab ... which is also a function of x ...
+//use a linear solver and treat G_ab = 8 pi T_ab like a linear system A x = b for x = (alpha, beta, gamma), A x = G_ab(x), and b = 8 pi T_ab ... which is also a function of x ...
 //nothing appears to be moving ...
-struct GMResSolver : public EFESolver {
+struct KrylovSolver : public EFESolver {
 	typedef EFESolver Super;
 	using Super::Super;
 	
 	Grid<Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> _8piTLLs;
-	
-	GMResSolver(int maxiter)
+	std::shared_ptr<Solvers::Krylov<real>> krylov;
+
+	KrylovSolver(int maxiter)
 	: Super(maxiter)
 	, _8piTLLs(sizev)
 	{}
-	
+
+	virtual const char* name() = 0;
+
 	//calls calc_8piTLL
 	//based on x which holds the metricPrims
 	//stores in _8piTLLs
@@ -646,72 +653,120 @@ struct GMResSolver : public EFESolver {
 			_8piTLLs(index) = calc_8piTLL(index, metricPrims);
 		});
 	}
+
+	void linearFunc(real* y, const real* x) {
+#ifdef PRINTTIME
+		std::cerr << "iteration " << jfnk.iter << std::endl;
+		time("calculating g_ab and g^ab", [&](){
+#endif				
+			calc_gLLs_and_gUUs(x);
+#ifdef PRINTTIME
+		});
+		time("calculating Gamma^a_bc", [&](){
+#endif				
+			calc_GammaULLs();
+#ifdef PRINTTIME
+		});
+		time("calculating G_ab", [&]{
+#endif				
+			calc_EinsteinLLs(y);
+#ifdef PRINTTIME
+		});
+		time("calculating T_ab", [&]{
+#endif				
+			//here's me abusing GMRes.
+			//I'm updating the 'b' vector mid-algorithm since it is dependent on the 'x' vector
+			calc_8piTLLs(x);
+#ifdef PRINTTIME
+		});
+#endif
+	}
+
+	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver() = 0;
 	
 	virtual void solve() {
-
 		time("calculating T_ab", [&]{
 			calc_8piTLLs((real*)metricPrimGrid.v);
 		});
-
-		struct GMRes : public Solvers::GMRes<real> {
-			using Solvers::GMRes<real>::GMRes;
-			virtual real calcResidual(real rNormL2, real bNormL2, const real* r) {
-				return Solvers::Vector<real>::normL2(n, r);
-			}
-		};
 		
-		size_t n = sizeof(MetricPrims) / sizeof(real) * gridVolume;
-		GMRes gmres(
-			n,	//n = vector size
-			(real*)metricPrimGrid.v,		//x = state vector
-			(const real*)_8piTLLs.v,		//b = solution vector
-			[&](real* y, const real* x) {	//A = linear function to solve x for A(x) = b
-#ifdef PRINTTIME
-				std::cerr << "iteration " << jfnk.iter << std::endl;
-				time("calculating g_ab and g^ab", [&](){
-#endif				
-				calc_gLLs_and_gUUs(x);
-#ifdef PRINTTIME
-				});
-				time("calculating Gamma^a_bc", [&](){
-#endif				
-				calc_GammaULLs();
-#ifdef PRINTTIME
-				});
-				time("calculating G_ab", [&]{
-#endif				
-				calc_EinsteinLLs(y);
-#ifdef PRINTTIME
-				});
-				time("calculating T_ab", [&]{
-#endif				
-				//here's me abusing GMRes.
-				//I'm updating the 'b' vector mid-algorithm since it is dependent on the 'x' vector
-				calc_8piTLLs(x);
-#ifdef PRINTTIME
-				});
-#endif
-			},
-			1e-30,			//epsilon
-			gridVolume,		//maxiter
-			100				//restart
-		);
+		krylov = makeSolver();
 		
 		//seems this is stopping too early, so try scaling both x and y ... or at least the normal that is used ...
-		/*gmres.MInv = [&](real* y, const real* x) {
-			for (int i = 0; i < n; ++i) {
+		/*krylov->MInv = [&](real* y, const real* x) {
+			for (int i = 0; i < krylov->n; ++i) {
 				y[i] = x[i] * c * c;
 			}
 		};*/
-		gmres.stopCallback = [&]()->bool{
-			fprintf(stderr, "gmres iter %d residual %.49e\n", gmres.iter, gmres.residual);
+		krylov->stopCallback = [&]()->bool{
+			fprintf(stderr, "%s iter %d residual %.49e\n", name(), krylov->iter, krylov->residual);
 			fflush(stderr);
 			return false;
 		};
 		time("solving", [&](){
-			gmres.solve();
+			krylov->solve();
 		});
+	}
+};
 
+struct ConjGradSolver : public KrylovSolver {
+	typedef KrylovSolver Super;
+	using Super::Super;
+	
+	virtual const char* name() { return "conjgrad"; }	
+	
+	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver() {
+		return std::make_shared<Solvers::ConjGrad<real>>(
+			getN(),
+			(real*)metricPrimGrid.v,
+			(const real*)_8piTLLs.v,
+			[&](real* y, const real* x) { linearFunc(y, x); },
+			1e-30,	//epsilon
+			getN()	//maxiter
+		);
+	}
+};
+
+struct ConjResSolver : public KrylovSolver {
+	typedef KrylovSolver Super;
+	using Super::Super;
+	
+	virtual const char* name() { return "conjres"; }
+	
+	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver() {
+		return std::make_shared<Solvers::ConjRes<real>>(
+			getN(),
+			(real*)metricPrimGrid.v,
+			(const real*)_8piTLLs.v,
+			[&](real* y, const real* x) { linearFunc(y, x); },
+			1e-30,	//epsilon
+			getN()	//maxiter
+		);
+	}
+};
+
+struct GMResSolver : public KrylovSolver {
+	typedef KrylovSolver Super;
+	using Super::Super;
+	
+	virtual const char* name() { return "gmres"; }
+
+	struct GMRes : public Solvers::GMRes<real> {
+		using Solvers::GMRes<real>::GMRes;
+		virtual real calcResidual(real rNormL2, real bNormL2, const real* r) {
+			return Solvers::Vector<real>::normL2(n, r);
+		}
+	};
+
+	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver() {
+		return std::make_shared<GMRes>(
+			getN(),	//n = vector size
+			(real*)metricPrimGrid.v,		//x = state vector
+			(const real*)_8piTLLs.v,		//b = solution vector
+			[&](real* y, const real* x) { linearFunc(y, x); },	//A = linear function to solve x for A(x) = b
+			1e-30,			//epsilon
+			getN(),			//maxiter
+			100				//restart
+		);
 	}
 };
 
@@ -724,7 +779,7 @@ struct JFNKSolver : public EFESolver {
 	virtual void solve() {
 		assert(sizeof(MetricPrims) == sizeof(EFEConstraintGrid.v[0]));	//this should be 10 real numbers and nothing else
 		Solvers::JFNK<real> jfnk(
-			sizeof(MetricPrims) / sizeof(real) * gridVolume,	//n = vector size
+			getN(),	//n = vector size
 			(real*)metricPrimGrid.v,	//x = state vector
 			[&](real* y, const real* x) {	//A = vector function to minimize
 
@@ -751,11 +806,11 @@ struct JFNKSolver : public EFESolver {
 			maxiter, 			//newton max iter
 			1e-7, 				//gmres stop epsilon
 #if 0	// this is ideal, but impractical with 32^3 data
-			gridVolume * 10, 	//gmres max iter
-			gridVolume			//gmres restart iter
+			getN() * 10, 		//gmres max iter
+			getN()				//gmres restart iter
 #endif
 #if 1	//so I'm doing this instead:
-			gridVolume * 10,	//gmres max maxiter
+			getN() * 10,	//gmres max maxiter
 			100					//gmres restart iter
 #endif
 		);
@@ -814,6 +869,8 @@ int main(int argc, char** argv) {
 		}
 	}
 	std::cerr << "maxiter=" << maxiter << std::endl;
+	std::cerr << "initCond=" << initCondName << std::endl;
+	std::cerr << "solver=" << solverName << std::endl;
 
 	time("allocating", [&]{ allocateGrids(sizev); });
 
@@ -927,8 +984,10 @@ int main(int argc, char** argv) {
 			const char* name;
 			std::function<std::shared_ptr<EFESolver>()> func;
 		} solvers[] = {
-			{"gmres", [&](){ return std::make_shared<GMResSolver>(maxiter); }},
 			{"jfnk", [&](){ return std::make_shared<JFNKSolver>(maxiter); }},
+			{"gmres", [&](){ return std::make_shared<GMResSolver>(maxiter); }},
+			{"conjgrad", [&](){ return std::make_shared<ConjResSolver>(maxiter); }},
+			{"conjres", [&](){ return std::make_shared<ConjGradSolver>(maxiter); }},
 		}, *p;
 		for (p = solvers; p < endof(solvers); ++p) {
 			if (p->name == solverName) {

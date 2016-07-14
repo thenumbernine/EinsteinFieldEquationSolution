@@ -29,6 +29,7 @@ local volumeShader
 -- which column to render?
 local col = ffi.new('int[1]', 4)
 local colmax	-- max # of columns
+local colnames
 
 local clipEnabled = ffi.new('bool[1]', true)
 local rotateClip = ffi.new('int[1]', 0)
@@ -42,7 +43,8 @@ local clipInfos = range(4):map(function(i)
 	}
 end)
 
-local alpha = ffi.new('float[1]', 1.5e-2)
+local alpha = ffi.new('float[1]', 1.5e-1)
+local alphaGamma = ffi.new('float[1]', 1)
 
 function App:initGL()
 	App.super.initGL(self)
@@ -52,23 +54,25 @@ function App:initGL()
 	
 	for l in io.lines'out.txt' do
 		l = l:trim()
-		if #l > 0 and l:sub(1,1) ~= '#' then
-			-- TODO pick out column titles from first line that starts with '#'
-			l = l:gsub('[%(%),]', '')
-				:gsub('%w+=', '')
-			w = l:split'%s+'
-			if not colmax then
-				colmax = #w
-			else 
-				assert(#w == colmax)
-			end
-			local pt = w:map(function(x) 
-				return tonumber(x) or error("expected a number but got "..x)
-			end)
-			self.pts:insert(pt)
-			for i=1,#pt do
-				self.min[i] = math.min(self.min[i] or pt[i], pt[i])
-				self.max[i] = math.max(self.max[i] or pt[i], pt[i])
+		if #l > 0 then
+			if l:sub(1,1) == '#' then
+				if not colnames then colnames = l:sub(2):trim():split'%s+' end
+			else
+				-- TODO pick out column titles from first line that starts with '#'
+				w = l:split'%s+'
+				if not colmax then
+					colmax = #w
+				else 
+					assert(#w == colmax)
+				end
+				local pt = w:map(function(x) 
+					return tonumber(x) or error("expected a number but got "..x)
+				end)
+				self.pts:insert(pt)
+				for i=1,#pt do
+					self.min[i] = math.min(self.min[i] or pt[i], pt[i])
+					self.max[i] = math.max(self.max[i] or pt[i], pt[i])
+				end
 			end
 		end
 	end
@@ -134,7 +138,7 @@ end
 			vec3(255,188,46),
 			vec3(255,255,55),
 		}:map(function(c,i)
-			return table(c/255):append{i/7*.8+.2}
+			return table(c/255):append{1}
 		end),
 --]]
 		false)
@@ -172,9 +176,10 @@ varying vec3 pos;
 uniform sampler3D volTex;
 uniform sampler2D hsvTex;
 uniform float alpha;
+uniform float alphaGamma;
 void main() {
 	float value = texture3D(volTex, pos).r;
-	vec4 voxelColor = vec4(texture2D(hsvTex, vec2(value, .5)).rgb, 1.);
+	vec4 voxelColor = vec4(texture2D(hsvTex, vec2(value, .5)).rgb, pow(alpha, alphaGamma));
 	gl_FragColor = vec4(voxelColor.rgb, voxelColor.a * alpha);
 }
 ]],
@@ -182,6 +187,7 @@ void main() {
 			'volTex',
 			'alpha',
 			'hsvTex',
+			'alphaGamma',
 		},
 	}
 	volumeShader:use()
@@ -216,6 +222,10 @@ function App:event(event, eventPtr)
 			leftShiftDown = event.type == sdl.SDL_KEYDOWN
 		elseif event.key.keysym.sym == sdl.SDLK_RSHIFT then
 			rightShiftDown = event.type == sdl.SDL_KEYDOWN
+		elseif event.key.keysym.sym == sdl.SDLK_UP and event.type == sdl.SDL_KEYUP then
+			col[0] = math.max(4, col[0] - 1)
+		elseif event.key.keysym.sym == sdl.SDLK_DOWN and event.type == sdl.SDL_KEYDOWN then
+			col[0] = math.min(colmax, col[0] + 1)
 		end
 	end
 end
@@ -282,6 +292,7 @@ function App:update()
 	tex:bind(0)
 	hsvTex:bind(1)
 	gl.glUniform1f(volumeShader.uniforms.alpha, alpha[0])
+	gl.glUniform1f(volumeShader.uniforms.alphaGamma, alphaGamma[0])
 
 	gl.glEnable(gl.GL_TEXTURE_GEN_S)
 	gl.glEnable(gl.GL_TEXTURE_GEN_T)
@@ -354,12 +365,15 @@ function App:update()
 end
 
 function App:updateGUI()
-	ig.igSliderInt('col', col, 4, colmax)
+	col[0] = col[0] - 4
+	ig.igCombo('column', col, colnames:sub(4))
+	col[0] = col[0] + 4
 	ig.igText(self.min[col[0]]..' to '..self.max[col[0]])
 	ig.igImage(
 		ffi.cast('void*',ffi.cast('intptr_t',hsvTex.id)),
 		ig.ImVec2(128, 32))
 	ig.igSliderFloat('alpha', alpha, 0, 1, '%.3e', 10)
+	ig.igSliderFloat('gamma', alphaGamma, 0, 1000, '%.3e', 10)
 	ig.igRadioButton("rotate camera", rotateClip, 0)
 	for i,clipInfo in ipairs(clipInfos) do
 		ig.igPushIdStr('clip '..i)

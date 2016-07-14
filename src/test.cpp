@@ -9,6 +9,8 @@ might get into trouble ensuring the hamiltonian or momentum constraints are fulf
 #include "Tensor/Derivative.h"
 #include "Solvers/JFNK.h"
 #include "Parallel/Parallel.h"
+#include "Common/Exception.h"
+#include "Common/Macros.h"
 #include <functional>
 #include <chrono>
 
@@ -183,10 +185,10 @@ int main() {
 	//earth volume: 1.0832120174985e+21 m^3
 	const real density = mass / volume;	// 1/m^2
 	//earth density: 4.0950296770075e-24 1/m^2
-	//const real schwarzschildRadius = 2 * mass;	//8.87157 mm, which is accurate
+	const real schwarzschildRadius = 2 * mass;	//8.87157 mm, which is accurate
 
 	//earth magnetic field at surface: .25-.26 gauss
-	//const real magneticField = .45 * sqrt(.1 * G) / c;	// 1/m
+	const real magneticField = .45 * sqrt(.1 * G) / c;	// 1/m
 
 	const real boundsSizeInRadius = 2;
 	//grid coordinate bounds
@@ -194,7 +196,7 @@ int main() {
 		xmin(-boundsSizeInRadius*radius, -boundsSizeInRadius*radius, -boundsSizeInRadius*radius),
 		xmax(boundsSizeInRadius*radius, boundsSizeInRadius*radius, boundsSizeInRadius*radius);
 	
-	int sizei = 128;
+	int sizei = 32;
 	Vector<int, spatialDim> sizev(sizei, sizei, sizei);
 	int gridVolume = sizev.volume();
 	Vector<real, spatialDim> dx = (xmax - xmin) / sizev;
@@ -274,12 +276,16 @@ int main() {
 			gUU(0,0) = -1/alphaSq;
 			for (int i = 0; i < spatialDim; ++i) {
 				gUU(i+1,0) = betaU(i) / alphaSq;
-				for (int j = 0; j < spatialDim; ++j) {
+				for (int j = 0; j <= i; ++j) {
 					gUU(i+1,j+1) = gammaUU(i,j) - betaU(i) * betaU(j) / alphaSq;
 				}
 			}
 		});
 	};
+
+	//temp for debugging:
+	Grid<Tensor<real, Lower<dim>, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> GammaLLLs(sizev);
+	Grid<Tensor<real, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>>, spatialDim> dgLLLs(sizev);
 
 	//depends on calc_gLLs_and_gUUs(x)
 	auto calc_GammaULLs = [&](const real* x) {
@@ -302,7 +308,8 @@ int main() {
 					return gLLs(index);
 				}
 			);
-			Tensor<real, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> dgLLL;
+			//Tensor<real, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> dgLLL;
+			Tensor<real, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>>& dgLLL = dgLLLs(index);
 			for (int a = 0; a < dim; ++a) {
 				for (int b = 0; b < dim; ++b) {	
 					dgLLL(a,b,0) = 0;	//TODO time derivative? for now assume steady state of metric.  this isn't necessary though ... spacetime vortex?
@@ -313,7 +320,9 @@ int main() {
 			}
 			
 			//connections
-			Tensor<real, Lower<dim>, Symmetric<Lower<dim>, Lower<dim>>> GammaLLL;
+			//Tensor<real, Lower<dim>, Symmetric<Lower<dim>, Lower<dim>>> GammaLLL;
+			//temp for debugging:
+			Tensor<real, Lower<dim>, Symmetric<Lower<dim>, Lower<dim>>>& GammaLLL = GammaLLLs(index);
 			for (int a = 0; a < dim; ++a) {
 				for (int b = 0; b < dim; ++b) {
 					for (int c = 0; c <= b; ++c) {
@@ -358,12 +367,14 @@ int main() {
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 			MetricPrims& metricPrims = metricPrimGrid(index);
 			
-			real r = Vector<real, spatialDim>::length(xs(index));
 			Vector<real, spatialDim> xi = xs(index);
+			real r = Vector<real, spatialDim>::length(xi);
 			//mass within radius
-			real m = 4/3 * M_PI * pow(std::min<real>(r, radius), 3) * density;
+			real matterRadius = std::min<real>(r, radius);
+			real volumeOfMatterRadius = 4/3*M_PI*matterRadius*matterRadius*matterRadius;
+			real matterEnclosed = density * volumeOfMatterRadius;
 			//substitute the schwarzschild R for 2 m(r)
-			real R = 2 * m;
+			real R = 2 * matterEnclosed;
 #if 0	//completely flat space
 			metricPrims.alpha = 1;
 			for (int i = 0; i < spatialDim; ++i) {
@@ -410,42 +421,197 @@ int main() {
 		calc_GammaULLs((real*)metricPrimGrid.v);
 	});
 
-	time("calculating gravitational force", [&]{
-		//this is printing output, so don't do it in parallel		
-		for (RangeObj<spatialDim>::iterator iter = range.begin(); iter != range.end(); ++iter) {
-			MetricPrims& metricPrims = metricPrimGrid(iter.index);
-			real r = Vector<real, spatialDim>::length(xs(iter.index));
-			real det = determinant33<real, Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>>>(metricPrims.gammaLL);
-		
-			
+	Grid<real, spatialDim> numericalGravity(sizev);
+	time("calculating numerical gravitational force", [&]{
+		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
+			Vector<real, spatialDim> xi = xs(index);
+			real r = Vector<real, spatialDim>::length(xi);
 			//numerical computational...		
-			Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>> &GammaULL = GammaULLs(iter.index);
-			//why is there a 2 here?
+			Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>> &GammaULL = GammaULLs(index);
+//the analytical calculations on these are identical, provided Gamma^i_tt is the schwarzschild metric connection
+//but the acceleration magnitude method can't show sign
+#if 1 // here's change-of-coordinate from G^i_tt to G^r_tt
 			//Gamma^r_tt = Gamma^i_tt dr/dx^i
 			//r^2 = x^2 + y^2 + z^2
 			//so dr/dx^i = x^i / r
-			Vector<real, spatialDim> xi = xs(iter.index);
-			real gravity = -(GammaULL(1,0,0) * xi(0) / r
-							+ GammaULL(2,0,0) * xi(1) / r
-							+ GammaULL(3,0,0) * xi(2) / r)
-							* c * c;	//times c twice because of the two timelike components of a^i = Gamma^i_tt
-		
+			numericalGravity(index) = -(GammaULL(1,0,0) * xi(0) / r
+									+ GammaULL(2,0,0) * xi(1) / r
+									+ GammaULL(3,0,0) * xi(2) / r)
+									* c * c;	//times c twice because of the two timelike components of a^i = Gamma^i_tt
+#endif
+#if 0	//here's taking the acceleration in cartesian and computing the magnitude of the acceleration vector
+			numericalGravity(index) = sqrt(GammaULL(1,0,0) * GammaULL(1,0,0)
+									+ GammaULL(2,0,0) * GammaULL(2,0,0)
+									+ GammaULL(3,0,0) * GammaULL(3,0,0))
+									* c * c;	//times c twice because of the two timelike components of a^i = Gamma^i_tt
+#endif
+		});
+	});
+
+	Grid<Tensor<real, Lower<spatialDim>>, spatialDim> analyticalGammaL_tts(sizev);
+	Grid<real, spatialDim> analyticalGravity(sizev);
+	time("calculating analytical gravitational force", [&]{
+		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
+			Vector<real, spatialDim> xi = xs(index);
+			real r = Vector<real, spatialDim>::length(xi);
 			//substitute the schwarzschild R for 2 m(r)
 			real matterRadius = std::min<real>(r, radius);
 			real volumeOfMatterRadius = 4/3*M_PI*matterRadius*matterRadius*matterRadius;
 			real matterEnclosed = density * volumeOfMatterRadius;	// m^3
 			real R = 2 * matterEnclosed;
-			real analyticalGravity = R * (r - R) / (2 * r * r * r) * c * c;
 
-			std::cout << iter.index 
-				<< " rho=" << stressEnergyPrimGrid(iter.index).rho 
-				<< " r=" << r 
-				<< " det=" << det 
-				<< " gravity=" << gravity
-				<< " analyticalGravity=" << analyticalGravity
-				<< std::endl;
-		}
+//Gamma_itt
+#if 1	//direct
+			const Tensor<real, Symmetric<Upper<dim>, Upper<dim>>> &gUU = gUUs(index);
+			Tensor<real, Lower<spatialDim>>& GammaL_tt = analyticalGammaL_tts(index);
+			for (int i = 0; i < spatialDim; ++i) {
+				GammaL_tt(i) = xi(i) * R / (2 * r * r * r);
+			}
+#endif
+
+//Gamma^i_tt:
+#if 1	//derived from g^ij and Gamma_itt
+			Tensor<real, Upper<spatialDim>> GammaU_tt;
+			for (int i = 0; i < spatialDim; ++i) {
+				real sum = 0;
+				for (int j = 0; j < spatialDim; ++j) {	//assuming Gamma_ttt = 0, so don't bother add it or g^it
+					sum += gUU(i+1,j+1) * GammaL_tt(j); 
+				}
+				GammaU_tt(i) = sum;
+			}
+#endif
+#if 0	//direct
+			Tensor<real, Upper<spatialDim>> GammaU_tt;
+			for (int i = 0; i < spatialDim; ++i) {
+				GammaUx_tt(i) = R * (r - R) * xi(i) / (2 * r * r * r * r);
+			}
+#endif
+
+//Gamma^r_tt:
+#if 1	//derived from Gamma^i_tt
+			real GammaUr_tt = 0;
+			for (int i = 0; i < spatialDim; ++i) {
+				GammaUr_tt += GammaU_tt(i) * xi(i) / r;
+			}
+			GammaUr_tt *= c * c;	//convert from m^3 to m/s^2
+#endif
+#if 0	//direct
+			real GammaUr_tt = R * (r - R) / (2 * r * r * r) * c * c;	//+9 at earth surface
+#endif
+			analyticalGravity(index) = GammaUr_tt;
+		});
 	});
+
+	{
+		struct Col {
+			std::string name;
+			std::function<real(Vector<int,spatialDim>)> func;
+		};
+		std::vector<Col> cols = {
+			{"ix", [&](Vector<int,spatialDim> index)->real{ return index(0); }},
+			{"iy", [&](Vector<int,spatialDim> index)->real{ return index(1); }},
+			{"iz", [&](Vector<int,spatialDim> index)->real{ return index(2); }},
+			{"rho", [&](Vector<int,spatialDim> index)->real{ return stressEnergyPrimGrid(index).rho; }},
+			{"det", [&](Vector<int,spatialDim> index)->real{ return -1 + determinant33<real, Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>>>(metricPrimGrid(index).gammaLL); }},
+			{"alpha", [&](Vector<int,spatialDim> index)->real{ return -1 + metricPrimGrid(index).alpha; }},
+#if 0	//within 1e-23			
+			{"ortho_error", [&](Vector<int,spatialDim> index)->real{
+				const Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> &gLL = gLLs(index);
+				const Tensor<real, Symmetric<Upper<dim>, Upper<dim>>> &gUU = gUUs(index);
+				real err = 0;
+				for (int a = 0; a < dim; ++a) {
+					for (int b = 0; b < dim; ++b) {
+						real sum = 0;
+						for (int c = 0; c < dim; ++c) {
+							sum += gLL(a,c) * gUU(c,b);
+						}
+						err += fabs(sum - (real)(a == b));
+					}
+				}
+				return err;
+			}},
+#endif
+#if 1		// numerical gravity is double what analytical gravity is ... and flips to negative as it passes the planet surface ...
+			{"gravity", [&](Vector<int,spatialDim> index)->real{ return numericalGravity(index); }},
+			{"analyticalGravity", [&](Vector<int,spatialDim> index)->real{ return analyticalGravity(index); }},
+#endif
+#if 0		// numerical Gamma_itt is about double what analytical Gamma_itt is ... 
+			{"Gamma_xtt", [&](Vector<int,spatialDim> index)->real{ return GammaLLLs(index)(1,0,0) * c * c; }},
+			{"analyticalGamma_xtt", [&](Vector<int,spatialDim> index)->real{ return analyticalGammaL_tts(index)(0) * c * c; }},
+			{"Gamma_ytt", [&](Vector<int,spatialDim> index)->real{ return GammaLLLs(index)(2,0,0) * c * c; }},
+			{"analyticalGamma_ytt", [&](Vector<int,spatialDim> index)->real{ return analyticalGammaL_tts(index)(1) * c * c; }},
+			{"Gamma_ztt", [&](Vector<int,spatialDim> index)->real{ return GammaLLLs(index)(3,0,0) * c * c; }},
+			{"analyticalGamma_ztt", [&](Vector<int,spatialDim> index)->real{ return analyticalGammaL_tts(index)(2) * c * c; }},
+#endif
+		};
+
+#if 0	//values are off in g_ab,c.  g_tt,i analytic are half numeric.  g_ij,k analytic are double numeric.
+		for (int u = 0; u < dim; ++u) {
+			for (int v = 0; v <= u; ++v) {
+				for (int w = 0; w < dim; ++w) {
+					bool at = u == 0;
+					bool bt = v == 0;
+					bool ct = w == 0;
+					if ((at && bt && !ct) || (!at && !bt && !ct)) {
+						std::string suffix = std::to_string(u) + std::to_string(v) + "," + std::to_string(w);
+						cols.push_back((Col){std::string("g_") + suffix, [&,u,v,w](Vector<int,spatialDim> index)->real{ return dgLLLs(index)(u,v,w) * c * c; }});
+						cols.push_back((Col){std::string("analytical-g_") + suffix, [&,u,v,w](Vector<int,spatialDim> index)->real{
+							Vector<real, spatialDim> xi = xs(index);
+							real r = Vector<real, spatialDim>::length(xi);
+							real matterRadius = std::min<real>(r, radius);
+							real volumeOfMatterRadius = 4/3*M_PI*matterRadius*matterRadius*matterRadius;
+							real matterEnclosed = density * volumeOfMatterRadius;	// m^3
+							real R = 2 * matterEnclosed;
+							if (u == 0) {
+								if (v == 0) {
+									if (w > 0) {
+										return -xi(w-1) * R / (r * r * r)
+										* c * c;
+									}
+								}
+							} else {
+								if (v > 0) {
+									if (w > 0) {
+										//g_ij = delta_ij + R x^i x^j / (r^2 (r - R))
+										//g_ij,k = R ((delta_ik x^j + delta_jk x^i) r^2 (r - R) + x^i x^j (r^2 (r - R)),k)  / (r^2 (r - R))^2
+										//note this assumes R_,i = 0, when in reality it's only 0 outside the planet
+										//maybe that is my discrepancy?
+										return (R * (
+											((u == w) * xi(v-1) + (v == w) * xi(u-1)) * r * r * (r - R)
+											+ xi(u-1) * xi(v-1) * (2 * xi(w-1) * (r - R) + r * xi(w-1))
+										) / ((r * r * (r - R)) * (r * r * (r - R)))
+										) * c * c;
+									}
+								}
+							}
+							throw Common::Exception() << "shouldn't get here";
+						}});
+					}
+				}
+			}
+		}
+#endif
+		std::cout << "#";
+		{
+			const char* tab = "";
+			for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {
+				std::cout << tab << p->name;
+				tab = "\t";
+			}
+		}
+		std::cout << std::endl;
+		time("outputting", [&]{
+			//this is printing output, so don't do it in parallel		
+			for (RangeObj<spatialDim>::iterator iter = range.begin(); iter != range.end(); ++iter) {
+				const char* tab = "";
+				for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {
+					std::cout << tab << p->func(iter.index);
+					tab = "\t";
+				}
+				std::cout << std::endl;
+			}
+		});
+	}
 
 	std::cerr << "done!" << std::endl;
 exit(0);

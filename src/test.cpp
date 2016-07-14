@@ -171,7 +171,18 @@ void allocateGrids(Vector<int, spatialDim> sizev) {
 	allocateGrid(GammaULLs, "GammaULLs", sizev, totalSize);
 }
 
-int main() {
+int main(int argc, char** argv) {
+
+	size_t maxiter = std::numeric_limits<size_t>::max();
+	for (int i = 1; i < argc; ++i) {
+		if (i < argc-1) {
+			if (!strcmp(argv[i], "maxiter")) {
+				++i;
+				maxiter = atoi(argv[i]);
+			}
+		}
+	}
+	std::cerr << "maxiter=" << maxiter << std::endl;
 
 #if 1	//earth
 	const real radius = 6.37101e+6;	// m
@@ -283,10 +294,6 @@ int main() {
 		});
 	};
 
-	//temp for debugging:
-	Grid<Tensor<real, Lower<dim>, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> GammaLLLs(sizev);
-	Grid<Tensor<real, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>>, spatialDim> dgLLLs(sizev);
-
 	//depends on calc_gLLs_and_gUUs(x)
 	auto calc_GammaULLs = [&](const real* x) {
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
@@ -308,8 +315,7 @@ int main() {
 					return gLLs(index);
 				}
 			);
-			//Tensor<real, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> dgLLL;
-			Tensor<real, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>>& dgLLL = dgLLLs(index);
+			Tensor<real, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> dgLLL;
 			for (int a = 0; a < dim; ++a) {
 				for (int b = 0; b < dim; ++b) {	
 					dgLLL(a,b,0) = 0;	//TODO time derivative? for now assume steady state of metric.  this isn't necessary though ... spacetime vortex?
@@ -320,9 +326,7 @@ int main() {
 			}
 			
 			//connections
-			//Tensor<real, Lower<dim>, Symmetric<Lower<dim>, Lower<dim>>> GammaLLL;
-			//temp for debugging:
-			Tensor<real, Lower<dim>, Symmetric<Lower<dim>, Lower<dim>>>& GammaLLL = GammaLLLs(index);
+			Tensor<real, Lower<dim>, Symmetric<Lower<dim>, Lower<dim>>> GammaLLL;
 			for (int a = 0; a < dim; ++a) {
 				for (int b = 0; b < dim; ++b) {
 					for (int c = 0; c <= b; ++c) {
@@ -368,6 +372,9 @@ int main() {
 			MetricPrims& metricPrims = metricPrimGrid(index);
 			Vector<real, spatialDim> xi = xs(index);
 			real r = Vector<real, spatialDim>::length(xi);
+			real matterRadius = std::min<real>(r, radius);
+			real volumeOfMatterRadius = 4/3*M_PI*matterRadius*matterRadius*matterRadius;
+			real m = density * volumeOfMatterRadius;	// m^3
 
 			//substitute the schwarzschild R for 2 m(r)
 #if 0	//completely flat space
@@ -399,7 +406,7 @@ int main() {
 			for (int i = 0; i < spatialDim; ++i) {
 				metricPrims.betaU(i) = 0;
 				for (int j = 0; j <= i; ++j) {
-					metricPrims.gammaLL(i,j) = (real)(i == j) + xi(i)/r * xi(j)/r * 2*mass/(r - 2*mass);
+					metricPrims.gammaLL(i,j) = (real)(i == j) + xi(i)/r * xi(j)/r * 2*m/(r - 2*m);
 					/*
 					dr^2's coefficient
 					spherical: 1/(1 - 2M/r) = 1/((r - 2M)/r) = r/(r - 2M)
@@ -452,7 +459,6 @@ int main() {
 		});
 	});
 
-	Grid<Tensor<real, Lower<spatialDim>>, spatialDim> analyticalGamma_itts(sizev);
 	Grid<real, spatialDim> analyticalGravity(sizev);
 	time("calculating analytical gravitational force", [&]{
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
@@ -463,95 +469,302 @@ int main() {
 			real volumeOfMatterRadius = 4/3*M_PI*matterRadius*matterRadius*matterRadius;
 			real m = density * volumeOfMatterRadius;	// m^3
 
-			Tensor<real, Lower<spatialDim>> dg_tti;
-#if 0	//(FAILS) numerically calculated
-			const Tensor<real, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>>& dgLLL = dgLLLs(index);
-			for (int i = 0; i < spatialDim; ++i) {
-				dg_tti(i) = dgLLL(0,0,i+1);
-			}
-#endif
-#if 0	//(FAILS) in absense of shift, g_tt,i = (-alpha^2),i via finite difference
-		//initial conditions: alpha = sqrt(1 - 2M/r), -alpha^2 = 2M/r-1, so (-alpha^2),i = (2M/r),i = -2M / r^2 * x^i/r = -x^i 2M / r^3 ... which matches the analytical version below
-			for (int i = 0; i < spatialDim; ++i) {
-				Vector<int, spatialDim> ip = index, im = index;
-				ip(i) = std::min<int>(ip(i)+1, sizev(i)-1);
-				im(i) = std::max<int>(im(i)-1, 0);
-				real alpha_p = metricPrimGrid(ip).alpha;
-				real alpha_m = metricPrimGrid(im).alpha;
-				dg_tti(i) = ((-alpha_p*alpha_p) - (-alpha_m*alpha_m)) / (2 * dx(i));
-			}
-#endif
-#if 0	//(FAILS)  g_tt,i = -2 alpha * alpha,i
-			for (int i = 0; i < spatialDim; ++i) {
-				Vector<int, spatialDim> ip = index, im = index;
-				ip(i) = std::min<int>(ip(i)+1, sizev(i)-1);
-				im(i) = std::max<int>(im(i)-1, 0);
-				real alpha = metricPrimGrid(index).alpha;
-				real alpha_p = metricPrimGrid(ip).alpha;
-				real alpha_m = metricPrimGrid(im).alpha;
-				dg_tti(i) = -2 * alpha * (alpha_p - alpha_m) / (2 * dx(i));
-			}
-#endif
-#if 1		//(WORKS) g_tt,i = -2 alpha alpha,i = -2 alpha sqrt(1-2M/r),i = -2 alpha * 1/2 1/sqrt(1-2M/r) * 2M/r^2 x^i/r = -x^i 2M / r^3
-			for (int i = 0; i < spatialDim; ++i) {
-				real alpha = metricPrimGrid(index).alpha;
-				dg_tti(i) = -2 * alpha * .5 / alpha * xi(i) * 2*mass / (r * r * r);	//which is really a quick simplification away from the direct analytical answer below, which works
-			}
-#endif
-//... so what is wrong with alpha,i?
-//alpha,i = sqrt(1-2M/r),i = 1/2 1/sqrt(1-2M/r) 2M/r^2 x^i/r = x^i 2M / (2 alpha r^3)
-#if 0	//(WORKS) direct
-			for (int i = 0; i < spatialDim; ++i) {
-				dg_tti(i) = -xi(i) * 2*m / (r * r * r);
-			}
-#endif
-
-			Tensor<real, Lower<spatialDim>>& Gamma_itt = analyticalGamma_itts(index);
-#if 1	//derived from -1/2 g_tt,i = -1/2 (-alpha^2),i = alpha alpha_,i.  when beta^i = 0 then only alpha affects Gamma^i_tt, which is gravity
-			for (int i = 0; i < spatialDim; ++i) {
-				Gamma_itt(i) = -.5 * dg_tti(i);
-			}
-#endif
-#if 0	//(WORKS) direct
-			for (int i = 0; i < spatialDim; ++i) {
-				Gamma_itt(i) = xi(i) * 2*m / (2 * r * r * r);
-			}
-#endif
-
-			Tensor<real, Upper<spatialDim>> GammaUi_tt;
-#if 1	//derived from g^ij and Gamma_itt
-			const Tensor<real, Symmetric<Upper<dim>, Upper<dim>>> &gUU = gUUs(index);
-			for (int i = 0; i < spatialDim; ++i) {
-				real sum = 0;
-				for (int j = 0; j < spatialDim; ++j) {	//assuming Gamma_ttt = 0, so don't bother add it or g^it
-					sum += gUU(i+1,j+1) * Gamma_itt(j); 
-				}
-				GammaUi_tt(i) = sum;
-			}
-#endif
-#if 0	//(WORKS) direct
-			for (int i = 0; i < spatialDim; ++i) {
-				GammaUx_tt(i) = 2*m * (r - 2*m) * xi(i) / (2 * r * r * r * r);
-			}
-#endif
-
-//Gamma^r_tt:
-#if 0	//derived from Gamma^i_tt
-			real GammaUr_tt = 0;
-			for (int i = 0; i < spatialDim; ++i) {
-				GammaUr_tt += GammaUi_tt(i) * xi(i) / r;
-			}
-			GammaUr_tt *= c * c;	//convert from m^3 to m/s^2
-#endif
-#if 1	//direct
-			real dR_dr = r > radius ? 0 : (2. * density * 4. * M_PI * r * r);	//enclosed matter derivative
-			real GammaUr_tt = (2*m * (r - 2*m) + dR_dr * r * (2*m - r)) / (2 * r * r * r)
+			//now that I'm using the correct alpha equation, my dm/dr term is causing the analytical gravity calculation to be off ...
+			//real dm_dr = r > radius ? 0 : density * 4 * M_PI * matterRadius * matterRadius;
+			// ... maybe it shouldn't be there to begin with?
+			real dm_dr = 0;
+			real GammaUr_tt = (2*m * (r - 2*m) + 2 * dm_dr * r * (2*m - r)) / (2 * r * r * r)
 				* c * c;	//+9 at earth surface, without matter derivatives
-#endif
+
 			//acceleration is -Gamma^r_tt along the radial direction (i.e. upwards from the surface), or Gamma^r_tt downward into the surface
 			analyticalGravity(index) = GammaUr_tt;
 		});
 	});
+
+	if (maxiter > 0) {
+		assert(sizeof(MetricPrims) == sizeof(real) * 10);	//this should be 10 real numbers and nothing else
+		Solvers::JFNK<real> jfnk(
+			sizeof(MetricPrims) / sizeof(real) * gridVolume,	//n = vector size
+			(real*)metricPrimGrid.v,	//x = state of vector
+			[&](real* y, const real* x) {	//A = vector function to minimize
+				real* ystart = y;
+
+				calc_gLLs_and_gUUs(x);
+				calc_GammaULLs(x);
+
+				parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
+
+					//connection derivative
+					Tensor<real, Lower<spatialDim>, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>> dGammaLULL3 = partialDerivative<
+						8,
+						real,
+						spatialDim,
+						Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>>
+					>(
+						index, dx,
+						[&](Vector<int, spatialDim> index)
+							-> Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>>
+						{
+							for (int i = 0; i < spatialDim; ++i) {
+								index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
+							}
+							return GammaULLs(index);
+						}
+					);			
+					
+					Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> dGammaULLL;
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b < dim; ++b) {
+							for (int c = 0; c <= b; ++c) {
+								dGammaULLL(a,b,c,0) = 0;	//TODO explicit calculate Gamma^a_bc,t in terms of alpha, beta^i, gamma_ij
+								for (int i = 0; i < spatialDim; ++i) {
+									dGammaULLL(a,b,c,i+1) = dGammaLULL3(i,a,b,c);
+								}
+							}
+						}
+					}
+					
+					const Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>> &GammaULL = GammaULLs(index);
+
+					Tensor<real, Upper<dim>, Lower<dim>, Lower<dim>, Lower<dim>> GammaSqULLL;
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b < dim; ++b) {
+							for (int c = 0; c < dim; ++c) {
+								for (int d = 0; d < dim; ++d) {
+									real sum = 0;
+									for (int e = 0; e < dim; ++e) {
+										sum += GammaULL(a,e,d) * GammaULL(e,b,c);
+									}
+									GammaSqULLL(a,b,c,d) = sum;
+								}
+							}
+						}
+					}
+
+					Tensor<real, Upper<dim>, Lower<dim>, Lower<dim>, Lower<dim>> RiemannULLL;
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b < dim; ++b) {
+							for (int c = 0; c < dim; ++c) {
+								for (int d = 0; d < dim; ++d) {
+									RiemannULLL(a,b,c,d) = dGammaULLL(a,b,d,c) - dGammaULLL(a,b,c,d) + GammaSqULLL(a,b,d,c) - GammaSqULLL(a,b,c,d);
+								}
+							}
+						}
+					}
+
+					Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> RicciLL;
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b < dim; ++b) {
+							real sum = 0;
+							for (int c = 0; c < dim; ++c) {
+								sum += RiemannULLL(c,a,c,b);
+							}
+							RicciLL(a,b) = sum;
+						}
+					}
+					
+					const Tensor<real, Symmetric<Upper<dim>, Upper<dim>>> &gUU = gUUs(index);
+					
+					real Gaussian = 0;
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b < dim; ++b) {
+							Gaussian += gUU(a,b) * RicciLL(a,b);
+						}
+					}
+					
+					const Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> &gLL = gLLs(index);
+
+					Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> EinsteinLL;
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b < dim; ++b) {
+							EinsteinLL(a,b) = RicciLL(a,b) - .5 * Gaussian * gLL(a,b);
+						}
+					}
+
+					//now we want to find the zeroes of EinsteinLL(a,b) - 8 pi T(a,b)
+					// ... which is 10 zeroes ...
+					// ... and we are minimizing the inputs to our metric ...
+					// alpha, beta x3, gamma x6
+					// ... which is 10 variables
+					// tada!			
+
+					const MetricPrims &metricPrims = *((const MetricPrims*)x + Vector<int, spatialDim>::dot(metricPrimGrid.step, index));
+					real alpha = metricPrims.alpha;
+					real alphaSq = alpha * alpha;
+					const Tensor<real, Upper<spatialDim>> &betaU = metricPrims.betaU;
+					const Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>> &gammaLL = metricPrims.gammaLL;
+
+					//now compute stress-energy based on source terms
+					//notice: stress energy depends on gLL (i.e. alpha, betaU, gammaLL), which it is solving for, so this has to be recalculated every iteration
+			
+					StressEnergyPrims &stressEnergyPrims = stressEnergyPrimGrid(index);
+
+					//electromagnetic stress-energy
+
+#ifdef USE_CHARGE_CURRENT_FOR_EM
+					Tensor<real, Upper<dim>> JU;
+					JU(0) = stressEnergyPrims.chargeDensity;
+					for (int i = 0; i < spatialDim; ++i) {
+						JU(i+1) = stressEnergyPrims.currentDensity(i);
+					}
+					Tensor<real, Upper<dim>> AU = JU;
+					/*
+					A^a;u = A^a_;v g^uv = (A^a_,v + Gamma^a_wv A^w) g^uv
+					A^a;u_;u = A^a;u_,u + Gamma^a_bu A^b;u + Gamma^u_bu A^a;b
+							= (A^a_;v g^uv = (A^a_,v + Gamma^a_wv A^w) g^uv)_,u
+								+ Gamma^a_bu (A^b_,v + Gamma^b_wv A^w) g^uv
+								- Gamma^u_bu (A^a_,v + Gamma^a_wv A^w) g^bv
+					((A^a_,b + Gamma^a_cb A^c) + R^a_b A^b) / (4 pi) = J^a
+					*/
+					JFNK(dim,
+						JU.v,
+						[&](double* y, const double* x) {
+							for (int a = 0; i < dim; ++a) {
+								
+							}
+						}
+					);
+#else	//USE_CHARGE_CURRENT_FOR_EM
+					Tensor<real, Upper<spatialDim>> E = stressEnergyPrims.E;
+					Tensor<real, Upper<spatialDim>> B = stressEnergyPrims.B;
+#endif
+
+					//electromagnetic stress-energy
+					real ESq = 0, BSq = 0;
+					for (int i = 0; i < spatialDim; ++i) {
+						for (int j = 0; j < spatialDim; ++j) {
+							ESq += E(i) * E(j) * gammaLL(i,j);
+							BSq += B(i) * B(j) * gammaLL(i,j);
+						}
+					}
+					Tensor<real, Upper<spatialDim>> S = cross(E, B);
+					
+					Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> T_EM_UU;
+					T_EM_UU(0,0) = (ESq + BSq) / alphaSq / (8 * M_PI);
+					for (int i = 0; i < spatialDim; ++i) {
+						T_EM_UU(i+1,0) = (-betaU(i) * (ESq + BSq) / alphaSq + 2 * S(i) / alpha) / (8 * M_PI);
+						for (int j = 0; j <= i; ++j) {
+							T_EM_UU(i+1,j+1) = -2 * (E(i) * E(j) + B(i) * B(j) + (S(i) * B(j) + S(j) * B(i)) / alpha) + betaU(i) * betaU(j) * (ESq + BSq) / alphaSq;
+							if (i == j) {
+								T_EM_UU(i+1,j+1) += ESq + BSq;
+							}
+							T_EM_UU(i+1,j+1) /= 8 * M_PI;
+						}
+					}
+
+					Tensor<real, Upper<dim>, Lower<dim>> T_EM_LU;
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b < dim; ++b) {
+							real sum = 0;
+							for (int w = 0; w < dim; ++w) {
+								sum += gLL(a,w) * T_EM_UU(w,b);
+							}
+							T_EM_LU(a,b) = sum;
+						}
+					}
+
+					Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> T_EM_LL;
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b <= a; ++b) {
+							real sum = 0;
+							for (int w = 0; w < dim; ++w) {
+								sum += T_EM_LU(a,w) * gLL(w,b);
+							}
+							T_EM_LL(a,b) = sum;
+						}
+					}
+
+					//matter stress-energy
+
+					Tensor<real, Upper<spatialDim>> &v = stressEnergyPrims.v;
+
+					//Lorentz factor
+					real vLenSq = 0;
+					for (int i = 0; i < spatialDim; ++i) {
+						for (int j = 0; j < spatialDim; ++j) {
+							vLenSq += v(i) * v(j) * gammaLL(i,j);
+						}
+					}
+					real W = 1 / sqrt( 1 - sqrt(vLenSq) );
+
+					//4-vel upper
+					Tensor<real, Upper<dim>> uU;
+					uU(0) = W;
+					for (int i = 0; i < spatialDim; ++i) {
+						uU(i+1) = W * v(i);
+					}
+
+					//4-vel lower
+					Tensor<real, Lower<dim>> uL;
+					for (int a = 0; a < dim; ++a) {
+						uL(a) = 0;
+						for (int b = 0; b < dim; ++b) {
+							uL(a) += uU(b) * gLL(b,a);
+						}
+					}
+
+					/*
+					Right now I'm using the SRHD T_matter_ab = (rho + rho eInt) u_a u_b + P P_ab
+						for P^ab = g^ab + u^a u^b = projection tensor
+					TODO viscious matter stress-energy: MTW 22.16d: T^ab = rho u^a u^b + (P - zeta theta) P^ab - 2 eta sigma^ab + q^a u^b + u^a q^b
+					T_heat_ab = q^a u^b + u^a q^b 
+						q^a = the heat-flux 4-vector
+					T_viscous_ab = -2 eta sigma^ab - zeta theta P^ab 
+						eta >= 0 = coefficient of dynamic viscosity
+						zeta >= 0 = coefficient of bulk viscosity
+						sigma^ab = 1/2(u^a_;u P^ub + u^b_;u P^ua) - theta P^ab / 3 = shear
+						theta = u^a_;a = expansion
+					*/	
+					Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> T_matter_LL;
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b <= a; ++b) {
+							T_matter_LL(a,b) = uL(a) * uL(b) * (stressEnergyPrims.rho * (1 + stressEnergyPrims.eInt) + stressEnergyPrims.P) + gLL(a,b) * stressEnergyPrims.P;
+						}
+					}
+					
+					//total stress-energy	
+					Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> T_LL = T_EM_LL + T_matter_LL;
+				
+					/*
+					now solve the linear system G_uv = G(g_uv) = 8 pi T_uv for g_uv 
+					i.e. A(x) = b, assuming A is linear ...
+					but it looks like, because T is based on g, it will really look like G(g_uv) = 8 pi T(g_uv, source terms)
+					*/
+
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b <= a; ++b) {
+							*y = EinsteinLL(a,b) - 8 * M_PI * T_LL(a,b);
+							++y;
+						}
+					}
+				});
+
+				int n = y - ystart;
+				if (n != gridVolume * 10) {
+					throw Common::Exception() << "expected " << (gridVolume * 10) << " but found " << n << " entries";
+				}
+
+			},
+			1e-7, //newton stop epsilon
+			maxiter, //newton max iter
+			1e-7, //gmres stop epsilon
+			gridVolume * 10, //gmres max iter
+			gridVolume	//gmres restart iter
+		);
+
+		jfnk.stopCallback = [&]()->bool{
+			printf("jfnk iter %d alpha %f residual %.16f\n", jfnk.iter, jfnk.alpha, jfnk.residual);
+			return false;
+		};
+		jfnk.gmres.stopCallback = [&]()->bool{
+			printf("gmres iter %d residual %.16f\n", jfnk.gmres.iter, jfnk.gmres.residual);
+			return false;
+		};
+		
+		time("solving", [&](){
+			jfnk.solve();
+		});
+	}
 
 	{
 		struct Col {
@@ -565,27 +778,6 @@ int main() {
 			{"rho", [&](Vector<int,spatialDim> index)->real{ return stressEnergyPrimGrid(index).rho; }},
 			{"det", [&](Vector<int,spatialDim> index)->real{ return -1 + determinant33<real, Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>>>(metricPrimGrid(index).gammaLL); }},
 			{"alpha", [&](Vector<int,spatialDim> index)->real{ return -1 + metricPrimGrid(index).alpha; }},
-#if 1
-			{"numerical-alpha_,x", [&](Vector<int,spatialDim> index)->real{
-				int i = 0;
-				Vector<int, spatialDim> ip = index, im = index;
-				ip(i) = std::min<int>(ip(i)+1, sizev(i)-1);
-				im(i) = std::max<int>(im(i)-1, 0);
-				real alpha = metricPrimGrid(index).alpha;
-				real alpha_p = metricPrimGrid(ip).alpha;
-				real alpha_m = metricPrimGrid(im).alpha;
-				return (alpha_p - alpha_m) / (2 * dx(i)) * c * c;
-			}},
-			{"analytical-alpha_,x", [&](Vector<int,spatialDim> index)->real{
-				int i = 0;
-				Vector<real, spatialDim> xi = xs(index);
-				real r = Vector<real, spatialDim>::length(xi);
-				real matterRadius = std::min<real>(r, radius);
-				real volumeOfMatterRadius = 4/3*M_PI*matterRadius*matterRadius*matterRadius;
-				real m = density * volumeOfMatterRadius;	// m^3
-				return xi(i) * m / (metricPrimGrid(index).alpha * r * r * r) * c * c;
-			}},
-#endif
 #if 0	//within 1e-23			
 			{"ortho_error", [&](Vector<int,spatialDim> index)->real{
 				const Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> &gLL = gLLs(index);
@@ -607,61 +799,8 @@ int main() {
 			{"gravity", [&](Vector<int,spatialDim> index)->real{ return numericalGravity(index); }},
 			{"analyticalGravity", [&](Vector<int,spatialDim> index)->real{ return analyticalGravity(index); }},
 #endif
-#if 0		// numerical Gamma_itt is about double what analytical Gamma_itt is ... 
-			{"Gamma_xtt", [&](Vector<int,spatialDim> index)->real{ return GammaLLLs(index)(1,0,0) * c * c; }},
-			{"analyticalGamma_xtt", [&](Vector<int,spatialDim> index)->real{ return analyticalGamma_itts(index)(0) * c * c; }},
-			{"Gamma_ytt", [&](Vector<int,spatialDim> index)->real{ return GammaLLLs(index)(2,0,0) * c * c; }},
-			{"analyticalGamma_ytt", [&](Vector<int,spatialDim> index)->real{ return analyticalGamma_itts(index)(1) * c * c; }},
-			{"Gamma_ztt", [&](Vector<int,spatialDim> index)->real{ return GammaLLLs(index)(3,0,0) * c * c; }},
-			{"analyticalGamma_ztt", [&](Vector<int,spatialDim> index)->real{ return analyticalGamma_itts(index)(2) * c * c; }},
-#endif
 		};
 
-#if 0	//values are off in g_ab,c.  g_tt,i analytic are half numeric.  g_ij,k analytic are double numeric.
-		for (int u = 0; u < dim; ++u) {
-			for (int v = 0; v <= u; ++v) {
-				for (int w = 0; w < dim; ++w) {
-					bool at = u == 0;
-					bool bt = v == 0;
-					bool ct = w == 0;
-					if ((at && bt && !ct) || (!at && !bt && !ct)) {
-						std::string suffix = std::to_string(u) + std::to_string(v) + "," + std::to_string(w);
-						cols.push_back((Col){std::string("g_") + suffix, [&,u,v,w](Vector<int,spatialDim> index)->real{ return dgLLLs(index)(u,v,w) * c * c; }});
-						cols.push_back((Col){std::string("analytical-g_") + suffix, [&,u,v,w](Vector<int,spatialDim> index)->real{
-							Vector<real, spatialDim> xi = xs(index);
-							real r = Vector<real, spatialDim>::length(xi);
-							real matterRadius = std::min<real>(r, radius);
-							real volumeOfMatterRadius = 4/3*M_PI*matterRadius*matterRadius*matterRadius;
-							real m = density * volumeOfMatterRadius;	// m^3
-							if (u == 0) {
-								if (v == 0) {
-									if (w > 0) {
-										return -xi(w-1) * 2*m / (r * r * r)
-										* c * c;
-									}
-								}
-							} else {
-								if (v > 0) {
-									if (w > 0) {
-										//g_ij = delta_ij + 2M x^i x^j / (r^2 (r - 2M))
-										//g_ij,k = 2M ((delta_ik x^j + delta_jk x^i) r^2 (r - 2M) + x^i x^j (r^2 (r - 2M)),k)  / (r^2 (r - 2M))^2
-										//note this assumes R_,i = 0, when in reality it's only 0 outside the planet
-										//maybe that is my discrepancy?
-										return (2*m * (
-											((u == w) * xi(v-1) + (v == w) * xi(u-1)) * r * r * (r - 2*m)
-											+ xi(u-1) * xi(v-1) * (2 * xi(w-1) * (r - 2*m) + r * xi(w-1))
-										) / ((r * r * (r - 2*m)) * (r * r * (r - 2*m)))
-										) * c * c;
-									}
-								}
-							}
-							throw Common::Exception() << "shouldn't get here";
-						}});
-					}
-				}
-			}
-		}
-#endif
 		std::cout << "#";
 		{
 			const char* tab = "";
@@ -683,287 +822,6 @@ int main() {
 			}
 		});
 	}
-
+	
 	std::cerr << "done!" << std::endl;
-exit(0);
-
-	assert(sizeof(MetricPrims) == sizeof(real) * 10);	//this should be 10 real numbers and nothing else
-	Solvers::JFNK<real> jfnk(
-		sizeof(MetricPrims) / sizeof(real) * gridVolume,	//n = vector size
-		(real*)metricPrimGrid.v,	//x = state of vector
-		[&](real* y, const real* x) {	//A = vector function to minimize
-			real* ystart = y;
-
-			calc_gLLs_and_gUUs(x);
-			calc_GammaULLs(x);
-
-			parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
-
-				//connection derivative
-				Tensor<real, Lower<spatialDim>, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>> dGammaLULL3 = partialDerivative<
-					8,
-					real,
-					spatialDim,
-					Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>>
-				>(
-					index, dx,
-					[&](Vector<int, spatialDim> index)
-						-> Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>>
-					{
-						for (int i = 0; i < spatialDim; ++i) {
-							index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
-						}
-						return GammaULLs(index);
-					}
-				);			
-				
-				Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> dGammaULLL;
-				for (int a = 0; a < dim; ++a) {
-					for (int b = 0; b < dim; ++b) {
-						for (int c = 0; c <= b; ++c) {
-							dGammaULLL(a,b,c,0) = 0;	//TODO explicit calculate Gamma^a_bc,t in terms of alpha, beta^i, gamma_ij
-							for (int i = 0; i < spatialDim; ++i) {
-								dGammaULLL(a,b,c,i+1) = dGammaLULL3(i,a,b,c);
-							}
-						}
-					}
-				}
-				
-				const Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>> &GammaULL = GammaULLs(index);
-
-				Tensor<real, Upper<dim>, Lower<dim>, Lower<dim>, Lower<dim>> GammaSqULLL;
-				for (int a = 0; a < dim; ++a) {
-					for (int b = 0; b < dim; ++b) {
-						for (int c = 0; c < dim; ++c) {
-							for (int d = 0; d < dim; ++d) {
-								real sum = 0;
-								for (int e = 0; e < dim; ++e) {
-									sum += GammaULL(a,e,d) * GammaULL(e,b,c);
-								}
-								GammaSqULLL(a,b,c,d) = sum;
-							}
-						}
-					}
-				}
-
-				Tensor<real, Upper<dim>, Lower<dim>, Lower<dim>, Lower<dim>> RiemannULLL;
-				for (int a = 0; a < dim; ++a) {
-					for (int b = 0; b < dim; ++b) {
-						for (int c = 0; c < dim; ++c) {
-							for (int d = 0; d < dim; ++d) {
-								RiemannULLL(a,b,c,d) = dGammaULLL(a,b,d,c) - dGammaULLL(a,b,c,d) + GammaSqULLL(a,b,d,c) - GammaSqULLL(a,b,c,d);
-							}
-						}
-					}
-				}
-
-				Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> RicciLL;
-				for (int a = 0; a < dim; ++a) {
-					for (int b = 0; b < dim; ++b) {
-						real sum = 0;
-						for (int c = 0; c < dim; ++c) {
-							sum += RiemannULLL(c,a,c,b);
-						}
-						RicciLL(a,b) = sum;
-					}
-				}
-				
-				const Tensor<real, Symmetric<Upper<dim>, Upper<dim>>> &gUU = gUUs(index);
-				
-				real Gaussian = 0;
-				for (int a = 0; a < dim; ++a) {
-					for (int b = 0; b < dim; ++b) {
-						Gaussian += gUU(a,b) * RicciLL(a,b);
-					}
-				}
-				
-				const Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> &gLL = gLLs(index);
-
-				Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> EinsteinLL;
-				for (int a = 0; a < dim; ++a) {
-					for (int b = 0; b < dim; ++b) {
-						EinsteinLL(a,b) = RicciLL(a,b) - .5 * Gaussian * gLL(a,b);
-					}
-				}
-
-				//now we want to find the zeroes of EinsteinLL(a,b) - 8 pi T(a,b)
-				// ... which is 10 zeroes ...
-				// ... and we are minimizing the inputs to our metric ...
-				// alpha, beta x3, gamma x6
-				// ... which is 10 variables
-				// tada!			
-
-				const MetricPrims &metricPrims = *((const MetricPrims*)x + Vector<int, spatialDim>::dot(metricPrimGrid.step, index));
-				real alpha = metricPrims.alpha;
-				real alphaSq = alpha * alpha;
-				const Tensor<real, Upper<spatialDim>> &betaU = metricPrims.betaU;
-				const Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>> &gammaLL = metricPrims.gammaLL;
-
-				//now compute stress-energy based on source terms
-				//notice: stress energy depends on gLL (i.e. alpha, betaU, gammaLL), which it is solving for, so this has to be recalculated every iteration
-		
-				StressEnergyPrims &stressEnergyPrims = stressEnergyPrimGrid(index);
-
-				//electromagnetic stress-energy
-
-#ifdef USE_CHARGE_CURRENT_FOR_EM
-				Tensor<real, Upper<dim>> JU;
-				JU(0) = stressEnergyPrims.chargeDensity;
-				for (int i = 0; i < spatialDim; ++i) {
-					JU(i+1) = stressEnergyPrims.currentDensity(i);
-				}
-				Tensor<real, Upper<dim>> AU = JU;
-				/*
-				A^a;u = A^a_;v g^uv = (A^a_,v + Gamma^a_wv A^w) g^uv
-				A^a;u_;u = A^a;u_,u + Gamma^a_bu A^b;u + Gamma^u_bu A^a;b
-						= (A^a_;v g^uv = (A^a_,v + Gamma^a_wv A^w) g^uv)_,u
-							+ Gamma^a_bu (A^b_,v + Gamma^b_wv A^w) g^uv
-							- Gamma^u_bu (A^a_,v + Gamma^a_wv A^w) g^bv
-				((A^a_,b + Gamma^a_cb A^c) + R^a_b A^b) / (4 pi) = J^a
-				*/
-				JFNK(dim,
-					JU.v,
-					[&](double* y, const double* x) {
-						for (int a = 0; i < dim; ++a) {
-							
-						}
-					}
-				);
-#else	//USE_CHARGE_CURRENT_FOR_EM
-				Tensor<real, Upper<spatialDim>> E = stressEnergyPrims.E;
-				Tensor<real, Upper<spatialDim>> B = stressEnergyPrims.B;
-#endif
-
-				//electromagnetic stress-energy
-				real ESq = 0, BSq = 0;
-				for (int i = 0; i < spatialDim; ++i) {
-					for (int j = 0; j < spatialDim; ++j) {
-						ESq += E(i) * E(j) * gammaLL(i,j);
-						BSq += B(i) * B(j) * gammaLL(i,j);
-					}
-				}
-				Tensor<real, Upper<spatialDim>> S = cross(E, B);
-				
-				Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> T_EM_UU;
-				T_EM_UU(0,0) = (ESq + BSq) / alphaSq / (8 * M_PI);
-				for (int i = 0; i < spatialDim; ++i) {
-					T_EM_UU(i+1,0) = (-betaU(i) * (ESq + BSq) / alphaSq + 2 * S(i) / alpha) / (8 * M_PI);
-					for (int j = 0; j <= i; ++j) {
-						T_EM_UU(i+1,j+1) = -2 * (E(i) * E(j) + B(i) * B(j) + (S(i) * B(j) + S(j) * B(i)) / alpha) + betaU(i) * betaU(j) * (ESq + BSq) / alphaSq;
-						if (i == j) {
-							T_EM_UU(i+1,j+1) += ESq + BSq;
-						}
-						T_EM_UU(i+1,j+1) /= 8 * M_PI;
-					}
-				}
-
-				Tensor<real, Upper<dim>, Lower<dim>> T_EM_LU;
-				for (int a = 0; a < dim; ++a) {
-					for (int b = 0; b < dim; ++b) {
-						real sum = 0;
-						for (int w = 0; w < dim; ++w) {
-							sum += gLL(a,w) * T_EM_UU(w,b);
-						}
-						T_EM_LU(a,b) = sum;
-					}
-				}
-
-				Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> T_EM_LL;
-				for (int a = 0; a < dim; ++a) {
-					for (int b = 0; b <= a; ++b) {
-						real sum = 0;
-						for (int w = 0; w < dim; ++w) {
-							sum += T_EM_LU(a,w) * gLL(w,b);
-						}
-						T_EM_LL(a,b) = sum;
-					}
-				}
-
-				//matter stress-energy
-
-				Tensor<real, Upper<spatialDim>> &v = stressEnergyPrims.v;
-
-				//Lorentz factor
-				real vLenSq = 0;
-				for (int i = 0; i < spatialDim; ++i) {
-					for (int j = 0; j < spatialDim; ++j) {
-						vLenSq += v(i) * v(j) * gammaLL(i,j);
-					}
-				}
-				real W = 1 / sqrt( 1 - sqrt(vLenSq) );
-
-				//4-vel upper
-				Tensor<real, Upper<dim>> uU;
-				uU(0) = W;
-				for (int i = 0; i < spatialDim; ++i) {
-					uU(i+1) = W * v(i);
-				}
-
-				//4-vel lower
-				Tensor<real, Lower<dim>> uL;
-				for (int a = 0; a < dim; ++a) {
-					uL(a) = 0;
-					for (int b = 0; b < dim; ++b) {
-						uL(a) += uU(b) * gLL(b,a);
-					}
-				}
-
-				/*
-				Right now I'm using the SRHD T_matter_ab = (rho + rho eInt) u_a u_b + P P_ab
-					for P^ab = g^ab + u^a u^b = projection tensor
-				TODO viscious matter stress-energy: MTW 22.16d: T^ab = rho u^a u^b + (P - zeta theta) P^ab - 2 eta sigma^ab + q^a u^b + u^a q^b
-				T_heat_ab = q^a u^b + u^a q^b 
-					q^a = the heat-flux 4-vector
-				T_viscous_ab = -2 eta sigma^ab - zeta theta P^ab 
-					eta >= 0 = coefficient of dynamic viscosity
-					zeta >= 0 = coefficient of bulk viscosity
-					sigma^ab = 1/2(u^a_;u P^ub + u^b_;u P^ua) - theta P^ab / 3 = shear
-					theta = u^a_;a = expansion
-				*/	
-				Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> T_matter_LL;
-				for (int a = 0; a < dim; ++a) {
-					for (int b = 0; b <= a; ++b) {
-						T_matter_LL(a,b) = uL(a) * uL(b) * (stressEnergyPrims.rho * (1 + stressEnergyPrims.eInt) + stressEnergyPrims.P) + gLL(a,b) * stressEnergyPrims.P;
-					}
-				}
-				
-				//total stress-energy	
-				Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> T_LL = T_EM_LL + T_matter_LL;
-			
-				/*
-				now solve the linear system G_uv = G(g_uv) = 8 pi T_uv for g_uv 
-				i.e. A(x) = b, assuming A is linear ...
-				but it looks like, because T is based on g, it will really look like G(g_uv) = 8 pi T(g_uv, source terms)
-				*/
-
-				for (int a = 0; a < dim; ++a) {
-					for (int b = 0; b <= a; ++b) {
-						*y = EinsteinLL(a,b) - 8 * M_PI * T_LL(a,b);
-						++y;
-					}
-				}
-			});
-
-			int n = y - ystart;
-			if (n != gridVolume * 10) {
-				throw Common::Exception() << "expected " << (gridVolume * 10) << " but found " << n << " entries";
-			}
-
-		},
-		1e-7, //newton stop epsilon
-		100, //newton maxi ter
-		1e-7, //gmres stop epsilon
-		gridVolume * 10, //gmres max iter
-		gridVolume	//gmres restart iter
-	);
-
-	jfnk.stopCallback = [&]()->bool{
-		printf("jfnk iter %d alpha %f residual %.16f\n", jfnk.iter, jfnk.alpha, jfnk.residual);
-		return false;
-	};
-	jfnk.gmres.stopCallback = [&]()->bool{
-		printf("gmres iter %d residual %.16f\n", jfnk.gmres.iter, jfnk.gmres.residual);
-		return false;
-	};
-	jfnk.solve();
 }

@@ -8,7 +8,5 @@ Converges on solution via...
 goals:
 1) verify Newtonian gravity matches Schwarzschild gravity from on to above the surface (check, from solar system project)
 2) verify Schwarzschild stellar model gravity due to analytical connection equations is maximal at surface, ->0 as r->0 and r->infinity (check)
-3) verify Schwarzschild stellar model gravity due to finite difference matches the analytical connection equation values (still working on this ...)
-3.5?) Find a metric within stars with nonzero G_ab = 8 pi T_ab, T_ab = diag(rho, P, P, P).  The current Schwarzschild model treats all matter as a point source, within the radius of the point of evaluation of the metric, and therefore always has G_ab = 0.
-	This *might* help the initial conditions, but shouldn't make a difference once numerical solution solving gets working.
+3) verify Schwarzschild stellar model gravity due to finite difference matches the analytical connection equation values (check)
 4) Get the numerical solution solver to work, and accurately.  Especially for it to start at flat space, given Earth's stress-energy source term, and come up with Earth's gravity, as the Schwarzschild analytical answer already gives us. 

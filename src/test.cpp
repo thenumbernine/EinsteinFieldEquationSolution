@@ -14,6 +14,8 @@ might get into trouble ensuring the hamiltonian or momentum constraints are fulf
 #include "Parallel/Parallel.h"
 #include "Common/Exception.h"
 #include "Common/Macros.h"
+#include "LuaCxx/State.h"
+#include "LuaCxx/Ref.h"
 #include <functional>
 #include <chrono>
 
@@ -814,8 +816,6 @@ struct JFNKSolver : public EFESolver {
 			100					//gmres restart iter
 #endif
 		);
-		jfnk.lineSearch = &Solvers::JFNK<real>::lineSearch_none;
-		jfnk.maxAlpha = 1e-10;
 		jfnk.stopCallback = [&]()->bool{
 			
 			bool constrained = false;
@@ -850,26 +850,19 @@ struct JFNKSolver : public EFESolver {
 };
 
 int main(int argc, char** argv) {
-
-	std::string initCondName = "stellar";
-	std::string solverName = "jfnk";
+	LuaCxx::State lua;
+	lua.loadFile("config.lua");
+	
 	int maxiter = std::numeric_limits<int>::max();
-	for (int i = 1; i < argc; ++i) {
-		if (i < argc-1) {
-			if (!strcmp(argv[i], "maxiter")) {
-				++i;
-				maxiter = atoi(argv[i]);
-			} else if (!strcmp(argv[i], "initcond")) {
-				++i;
-				initCondName = argv[i];
-			} else if (!strcmp(argv[i], "solver")) {
-				++i;
-				solverName = argv[i];
-			}
-		}
-	}
+	if (!lua["maxiter"].isNil()) lua["maxiter"] >> maxiter;	
 	std::cerr << "maxiter=" << maxiter << std::endl;
+	
+	std::string initCondName = "stellar";
+	if (!lua["initCond"].isNil()) lua["initCond"] >> initCondName;
 	std::cerr << "initCond=" << initCondName << std::endl;
+	
+	std::string solverName = "jfnk";
+	if (!lua["solver"].isNil()) lua["solver"] >> solverName;	
 	std::cerr << "solver=" << solverName << std::endl;
 
 	time("allocating", [&]{ allocateGrids(sizev); });

@@ -165,17 +165,11 @@ const real density = mass / volume;	// 1/m^2
 //earth magnetic field at surface: .25-.26 gauss
 const real magneticField = .45 * sqrt(.1 * G) / c;	// 1/m
 
-const real boundsSizeInRadius = 2;
 //grid coordinate bounds
-Vector<real, spatialDim> 
-	xmin(-boundsSizeInRadius*radius, -boundsSizeInRadius*radius, -boundsSizeInRadius*radius),
-	xmax(boundsSizeInRadius*radius, boundsSizeInRadius*radius, boundsSizeInRadius*radius);
-
-const int sizei = 16;//32;//128;
-const Vector<int, spatialDim> sizev(sizei, sizei, sizei);
-const int gridVolume = sizev.volume();
-const Vector<real, spatialDim> dx = (xmax - xmin) / sizev;
-RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
+Vector<real, spatialDim> xmin, xmax;
+Vector<int, spatialDim> sizev;
+int gridVolume;
+Vector<real, spatialDim> dx;
 
 //grids
 Grid<Vector<real, spatialDim>, spatialDim> xs;
@@ -222,6 +216,7 @@ Vector<int, spatialDim> next(Vector<int, spatialDim> v, int i) {
 //based on x which holds metric prims 
 void calc_gLLs_and_gUUs(const real* x) {
 	//calculate gLL and gUU from metric primitives
+	RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 
 		const MetricPrims &metricPrims = *((const MetricPrims*)x + Vector<int, spatialDim>::dot(metricPrimGrid.step, index));
@@ -283,6 +278,7 @@ void calc_gLLs_and_gUUs(const real* x) {
 //depends on the gLLs and gUUs which are calculated in calc_gLLs_and_gUUs(x)
 //calculates GammaULLs
 void calc_GammaULLs() {
+	RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 		//derivatives of the metric in spatial coordinates using finite difference
 		//the templated method (1) stores derivative first and (2) only stores spatial
@@ -435,6 +431,7 @@ Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_EinsteinLL(Vector<int, spat
 //calls calc_EinsteinLL at each point
 //stores in the grid at y
 void calc_EinsteinLLs(real* y) {
+	RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 		int offset = Vector<int, spatialDim>::dot(xs.step, index);
 		Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>& EinsteinLL = *((Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>*)y + offset);
@@ -589,6 +586,7 @@ Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_8piTLL(Vector<int,spatialDi
 }
 
 void calc_EFE_constraint(real* y, const real* x) {
+	RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 
 		//for the JFNK solver that doesn't cache the EinsteinLL tensors
@@ -649,6 +647,7 @@ struct KrylovSolver : public EFESolver {
 	//based on x which holds the metricPrims
 	//stores in _8piTLLs
 	void calc_8piTLLs(const real* x) {
+		RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 			int offset = Vector<int, spatialDim>::dot(metricPrimGrid.step, index);
 			const MetricPrims &metricPrims = *((const MetricPrims*)x + offset);
@@ -862,10 +861,24 @@ int main(int argc, char** argv) {
 	if (!lua["solver"].isNil()) lua["solver"] >> solverName;	
 	std::cout << "solver=" << solverName << std::endl;
 
+	int size = 16;
+	if (!lua["size"].isNil()) lua["size"] >> size;
+
+	real bodyRadii = 2;
+	if (!lua["bodyRadii"].isNil()) lua["bodyRadii"] >> bodyRadii;
+
+	xmin = Vector<real, spatialDim>(-bodyRadii*radius, -bodyRadii*radius, -bodyRadii*radius),
+	xmax = Vector<real, spatialDim>(bodyRadii*radius, bodyRadii*radius, bodyRadii*radius);
+	sizev = Vector<int, spatialDim>(size, size, size);
+	gridVolume = sizev.volume();
+	dx = (xmax - xmin) / sizev;
+
+
 	time("allocating", [&]{ allocateGrids(sizev); });
 
 	//specify coordinates
 	time("calculating grid", [&]{
+		RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 			Vector<real, spatialDim>& xi = xs(index);
 			for (int j = 0; j < spatialDim; ++j) {
@@ -877,6 +890,7 @@ int main(int argc, char** argv) {
 	//specify stress-energy primitives
 	//the stress-energy primitives combined with the current metric are used to compute the stress-energy tensor 
 	time("calculating stress-energy primitives", [&]{
+		RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 			StressEnergyPrims &stressEnergyPrims = stressEnergyPrimGrid(index);
 			real r = Vector<real, spatialDim>::length(xs(index));
@@ -962,6 +976,7 @@ int main(int argc, char** argv) {
 
 		//initialize metric primitives
 		time("calculating metric primitives", [&]{
+			RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 			parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 				initCond(index);
 			});
@@ -1007,6 +1022,7 @@ int main(int argc, char** argv) {
 
 	Grid<real, spatialDim> numericalGravity(sizev);
 	time("calculating numerical gravitational force", [&]{
+		RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 			Vector<real, spatialDim> xi = xs(index);
 			real r = Vector<real, spatialDim>::length(xi);
@@ -1034,6 +1050,7 @@ int main(int argc, char** argv) {
 
 	Grid<real, spatialDim> analyticalGravity(sizev);
 	time("calculating analytical gravitational force", [&]{
+		RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 			Vector<real, spatialDim> xi = xs(index);
 			real r = Vector<real, spatialDim>::length(xi);
@@ -1116,6 +1133,7 @@ int main(int argc, char** argv) {
 			fprintf(file, "\n");
 			time("outputting", [&]{
 				//this is printing output, so don't do it in parallel		
+				RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 				for (RangeObj<spatialDim>::iterator iter = range.begin(); iter != range.end(); ++iter) {
 					const char* tab = "";
 					for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {

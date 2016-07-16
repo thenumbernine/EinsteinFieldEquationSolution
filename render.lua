@@ -1,4 +1,8 @@
 #!/usr/bin/env luajit
+--[[
+this should be a stand-alone tool
+--]]
+local filename = ... or 'out.txt'
 require 'ext'
 local bit = require 'bit'
 local ffi = require 'ffi'
@@ -8,9 +12,11 @@ local ig = require 'ffi.imgui'
 local ImGuiApp = require 'imguiapp'
 local Mouse = require 'gui.mouse'
 local quat = require 'vec.quat'
+local vec3 = require 'vec.vec3'
 local vec4 = require 'vec.vec4'
 local vec4d = require 'ffi.vec.vec4d'
 local glreport = require 'gl.report'
+local glcall = require 'gl.call'
 local GradientTex = require 'gl.gradienttex'
 local Tex2D = require 'gl.tex2d'
 local Tex3D = require 'gl.tex3d'
@@ -45,6 +51,7 @@ end)
 
 local alpha = ffi.new('float[1]', 1.5e-1)
 local alphaGamma = ffi.new('float[1]', 1)
+local showTrace = ffi.new('bool[1]', false)
 
 function App:initGL()
 	App.super.initGL(self)
@@ -52,7 +59,7 @@ function App:initGL()
 	self.min = table()
 	self.max = table()
 	
-	for l in io.lines'out.txt' do
+	for l in io.lines(filename) do
 		l = l:trim()
 		if #l > 0 then
 			if l:sub(1,1) == '#' then
@@ -368,10 +375,101 @@ function App:update()
 	tex:unbind(0)
 	volumeShader:useNone()
 
+	if showTrace[0] then
+		gl.glDisable(gl.GL_DEPTH_TEST)
+	
+		self.wireLists = self.wireLists or {}
+		self.wireLists[col[0]] = self.wireLists[col[0]] or {}
+		glcall(self.wireLists[col[0]], function()
+			
+			-- TODO
+			-- 1) space out seeds
+			-- 2) integrate rk4 or something the lines
+			local divs = 8
+			for i=1,self.max[1]-1,(self.max[1]+1)/divs do
+				for j=1,self.max[2]-1,(self.max[2]+1)/divs do
+					for k=1,self.max[3]-1,(self.max[3]+1)/divs do
+
+						local function trace(x, dir)
+							gl.glBegin(gl.GL_LINE_STRIP)
+							local lastdx
+							while true do
+								local function intx(x)
+									local i = vec3(math.floor(x[1]), math.floor(x[2]), math.floor(x[3]))
+									if i[1] < 1 or i[1] > self.max[1]-2
+									or i[2] < 1 or i[2] > self.max[2]-2
+									or i[3] < 1 or i[3] > self.max[3]-2
+									then
+										return
+									end
+									return i
+								end
+								local function dx_ds(x)
+									local i = intx(x)
+									if not i then return end
+									local f = x - i
+									
+									local indexm = 1 + i[1] + (self.max[1] + 1) * (i[2] + (self.max[2] + 1) * i[3])
+									assert(indexm >= 1 and indexm <= #self.pts, "failed for i="..i.." x="..x)
+									local dxm = vec3(
+										self.pts[indexm + 1][col[0]] - self.pts[indexm - 1][col[0]],
+										self.pts[indexm + self.max[1] + 1][col[0]] - self.pts[indexm - self.max[1] - 1][col[0]],
+										self.pts[indexm+(self.max[1]+1)*(self.max[2]+1)][col[0]]-self.pts[indexm-(self.max[1]+1)*(self.max[2]+1)][col[0]])
+									local indexp = 1 + i[1]+1 + (self.max[1] + 1) * (i[2]+1 + (self.max[2] + 1) * (i[3]+1))
+									assert(indexp >= 1 and indexp <= #self.pts, "failed for i="..i.." x="..x)
+									local dxp = vec3(
+										self.pts[indexp + 1][col[0]] - self.pts[indexp - 1][col[0]],
+										self.pts[indexp + self.max[1] + 1][col[0]] - self.pts[indexp - self.max[1] - 1][col[0]],
+										self.pts[indexp+(self.max[1]+1)*(self.max[2]+1)][col[0]]-self.pts[indexp-(self.max[1]+1)*(self.max[2]+1)][col[0]])
+								
+									local dx = vec3(
+										dxm[1] * (1 - f[1]) + dxp[1] * f[1],
+										dxm[2] * (1 - f[2]) + dxp[2] * f[2],
+										dxm[3] * (1 - f[3]) + dxp[3] * f[3])
+									local len = dx:length()
+									if len < 1e-20 then return end
+									return dx / len
+								end
+
+								local h = 1/(self.max[1]+1)
+								-- rk4
+								local k1 = dx_ds(x)
+								if not k1 then break end
+								local k2 = dx_ds(x + k1 * (h/2))
+								if not k2 then break end
+								local k3 = dx_ds(x + k2 * (h/2))
+								if not k3 then break end
+								local k4 = dx_ds(x + k3 * h)
+								if not k4 then break end
+								local dx = k1*(h/6) + k2*(h/3) + k3*(h/3) + k4*(h/6)
+								if lastdx and dx:dot(lastdx) < 1e-20 then break end
+								lastdx = dx
+								x = x + dx * dir
+								if not intx(x) then break end
+								if not math.isfinite(x[1]) or not math.isfinite(x[2]) or not math.isfinite(x[3]) then break end
+
+								gl.glVertex3d(
+									(x[1]+.5)/(self.max[1]+1),
+									(x[2]+.5)/(self.max[2]+1),
+									(x[3]+.5)/(self.max[3]+1))
+							end
+							gl.glEnd()
+						end
+
+						local pt = vec3(i+.5,j+.5,k+.5)
+						trace(pt, 1)
+						trace(pt, -1)
+					end
+				end
+			end
+		end)
+		gl.glEnable(gl.GL_DEPTH_TEST)
+	end
+
 	for i,clipInfo in ipairs(clipInfos) do
 		gl.glDisable(gl.GL_CLIP_PLANE0+i-1)
 	end
-	
+
 	glreport'here'
 
 	App.super.update(self)
@@ -379,7 +477,7 @@ end
 
 function App:updateGUI()
 	col[0] = col[0] - 4
-	ig.igCombo('column', col, colnames:sub(4))
+	ig.igCombo('column', col, colnames and colnames:sub(4) or range(4,colmax))
 	col[0] = col[0] + 4
 	ig.igText(('%.3e to %.3e'):format(self.min[col[0]], self.max[col[0]]))
 	
@@ -410,6 +508,7 @@ function App:updateGUI()
 		ig.igRadioButton('rotate', rotateClip, i)
 		ig.igPopId()
 	end
+	ig.igCheckbox('show trace', showTrace)
 end
 
 local app = App()

@@ -22,13 +22,13 @@ might get into trouble ensuring the hamiltonian or momentum constraints are fulf
 Parallel::Parallel parallel(8);
 
 void time(const std::string name, std::function<void()> f) {
-	std::cerr << name << " ... ";
-	std::cerr.flush();
+	std::cout << name << " ... ";
+	std::cout.flush();
 	auto start = std::chrono::high_resolution_clock::now();
 	f();
 	auto end = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> diff = end - start;
-	std::cerr << "(" << diff.count() << "s)" << std::endl;
+	std::cout << "(" << diff.count() << "s)" << std::endl;
 }
 
 //opposite upper/lower of what is already in Tensor/Inverse.h
@@ -121,61 +121,16 @@ struct StressEnergyPrims {
 	*/
 };
 
-/*
-natural units ...
-1 = c m/s = 299792458 m/s
-	1 s = c m
-	1 s = 299792458 m
-1 = G m^3 / (kg s^2) = 6.67384e-11 m^3 / (kg s^2)
-    kg = G m^3 / s^2 = G / c^2 m
-	kg = 7.4256484500929e-28 m
-1 = kB m^2 kg / (K s^2) = 1.3806488e-23 m^2 kg / (K s^2)
-	K = kB kg m^2 / s^2 = kB / c^2 kg = kB G / c^4 m
-	K = 1.1407124948367e-67 m
-joules: J = kg m^2 / s^2
-electronvolts: 1 eV = 1.6e-19 J
-Gauss: 1 Gauss^2 = g / (cm s^2) = .1 kg / (m s^2)
-	1 Gauss^2 = .1 G/c^4 1/m^2
-	Gauss = sqrt(.1 G/c^2) 1/m
-
-I'm going to use meters as my units ...
-
-Radius of Earth = 6.37101e+6 m
-Mass of Earth = 5.9736e+24 kg
-*/
 const real c = 299792458;	// m/s 
 const real G = 6.67384e-11;	// m^3 / (kg s^2)
-//const real kB = 1.3806488e-23;	// m^2 kg / (K s^2)
 
-
-#if 1	//earth
-const real radius = 6.37101e+6;	// m
-const real mass = 5.9736e+24 * G / c / c;	// m
-#endif
-#if 0	//sun
-const real radius = 6.960e+8;	// m
-const real mass = 1.9891e+30 * G / c / c;	// m
-#endif
-const real volume = 4/3*M_PI*radius*radius*radius;	// m^3
-//earth volume: 1.0832120174985e+21 m^3
-const real density = mass / volume;	// 1/m^2
-//earth density: 4.0950296770075e-24 1/m^2
-//const real schwarzschildRadius = 2 * mass;	//Schwarzschild radius: 8.87157 mm, which is accurate
-
-//earth magnetic field at surface: .25-.26 gauss
-const real magneticField = .45 * sqrt(.1 * G) / c;	// 1/m
-
-const real boundsSizeInRadius = 2;
 //grid coordinate bounds
-Vector<real, spatialDim> 
-	xmin(-boundsSizeInRadius*radius, -boundsSizeInRadius*radius, -boundsSizeInRadius*radius),
-	xmax(boundsSizeInRadius*radius, boundsSizeInRadius*radius, boundsSizeInRadius*radius);
+Vector<real, spatialDim> xmin, xmax;
 
-const int sizei = 16;//32;//128;
-const Vector<int, spatialDim> sizev(sizei, sizei, sizei);
-const int gridVolume = sizev.volume();
-const Vector<real, spatialDim> dx = (xmax - xmin) / sizev;
-RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
+int size = 16;
+Vector<int, spatialDim> sizev;
+int gridVolume;
+Vector<real, spatialDim> dx;
 
 //grids
 Grid<Vector<real, spatialDim>, spatialDim> xs;
@@ -190,14 +145,14 @@ Grid<Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> Ga
 
 template<typename CellType>
 void allocateGrid(Grid<CellType, spatialDim>& grid, std::string name, Vector<int, spatialDim> sizev, size_t& totalSize) {
-	size_t size = sizeof(CellType) * sizev.volume();
-	totalSize += size;
-	std::cerr << name << ": " << size << " bytes, running total: " << totalSize << std::endl;
+	size_t bytes = sizeof(CellType) * sizev.volume();
+	totalSize += bytes;
+	std::cout << name << ": " << bytes << " bytes, running total: " << totalSize << std::endl;
 	grid.resize(sizev);
 }
 
 void allocateGrids(Vector<int, spatialDim> sizev) {
-	std::cerr << std::endl;
+	std::cout << std::endl;
 	size_t totalSize = 0;
 	allocateGrid(xs, "xs", sizev, totalSize);
 	allocateGrid(stressEnergyPrimGrid, "stressEnergyPrimGrid", sizev, totalSize);
@@ -222,6 +177,7 @@ Vector<int, spatialDim> next(Vector<int, spatialDim> v, int i) {
 //based on x which holds metric prims 
 void calc_gLLs_and_gUUs(const real* x) {
 	//calculate gLL and gUU from metric primitives
+	RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 
 		const MetricPrims &metricPrims = *((const MetricPrims*)x + Vector<int, spatialDim>::dot(metricPrimGrid.step, index));
@@ -283,6 +239,7 @@ void calc_gLLs_and_gUUs(const real* x) {
 //depends on the gLLs and gUUs which are calculated in calc_gLLs_and_gUUs(x)
 //calculates GammaULLs
 void calc_GammaULLs() {
+	RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 		//derivatives of the metric in spatial coordinates using finite difference
 		//the templated method (1) stores derivative first and (2) only stores spatial
@@ -435,6 +392,7 @@ Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_EinsteinLL(Vector<int, spat
 //calls calc_EinsteinLL at each point
 //stores in the grid at y
 void calc_EinsteinLLs(real* y) {
+	RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 		int offset = Vector<int, spatialDim>::dot(xs.step, index);
 		Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>& EinsteinLL = *((Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>*)y + offset);
@@ -589,6 +547,7 @@ Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_8piTLL(Vector<int,spatialDi
 }
 
 void calc_EFE_constraint(real* y, const real* x) {
+	RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 
 		//for the JFNK solver that doesn't cache the EinsteinLL tensors
@@ -649,6 +608,7 @@ struct KrylovSolver : public EFESolver {
 	//based on x which holds the metricPrims
 	//stores in _8piTLLs
 	void calc_8piTLLs(const real* x) {
+		RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 			int offset = Vector<int, spatialDim>::dot(metricPrimGrid.step, index);
 			const MetricPrims &metricPrims = *((const MetricPrims*)x + offset);
@@ -658,7 +618,7 @@ struct KrylovSolver : public EFESolver {
 
 	void linearFunc(real* y, const real* x) {
 #ifdef PRINTTIME
-		std::cerr << "iteration " << jfnk.iter << std::endl;
+		std::cout << "iteration " << jfnk.iter << std::endl;
 		time("calculating g_ab and g^ab", [&](){
 #endif				
 			calc_gLLs_and_gUUs(x);
@@ -700,8 +660,7 @@ struct KrylovSolver : public EFESolver {
 			}
 		};*/
 		krylov->stopCallback = [&]()->bool{
-			fprintf(stderr, "%s iter %d residual %.49e\n", name(), krylov->iter, krylov->residual);
-			fflush(stderr);
+			printf("%s iter %d residual %.49e\n", name(), krylov->iter, krylov->residual);
 			return false;
 		};
 		time("solving", [&](){
@@ -786,7 +745,7 @@ struct JFNKSolver : public EFESolver {
 			[&](real* y, const real* x) {	//A = vector function to minimize
 
 #ifdef PRINTTIME
-				std::cerr << "iteration " << jfnk.iter << std::endl;
+				std::cout << "iteration " << jfnk.iter << std::endl;
 				time("calculating g_ab and g^ab", [&](){
 #endif				
 				calc_gLLs_and_gUUs(x);
@@ -833,13 +792,11 @@ struct JFNKSolver : public EFESolver {
 				if (jfnk.residual != jfnk.residual) jfnk.residual = std::numeric_limits<real>::max();
 			}
 			
-			fprintf(stderr, "jfnk iter %d alpha %f residual %.16f\n", jfnk.iter, jfnk.alpha, jfnk.residual);
-			fflush(stderr);
+			printf("jfnk iter %d alpha %f residual %.16f\n", jfnk.iter, jfnk.alpha, jfnk.residual);
 			return false;
 		};
 		jfnk.gmres.stopCallback = [&]()->bool{
-			fprintf(stderr, "gmres iter %d residual %.16f\n", jfnk.gmres.iter, jfnk.gmres.residual);
-			fflush(stderr);
+			printf("gmres iter %d residual %.16f\n", jfnk.gmres.iter, jfnk.gmres.residual);
 			return false;
 		};
 		
@@ -855,20 +812,35 @@ int main(int argc, char** argv) {
 	
 	int maxiter = std::numeric_limits<int>::max();
 	if (!lua["maxiter"].isNil()) lua["maxiter"] >> maxiter;	
-	std::cerr << "maxiter=" << maxiter << std::endl;
-	
-	std::string initCondName = "stellar";
-	if (!lua["initCond"].isNil()) lua["initCond"] >> initCondName;
-	std::cerr << "initCond=" << initCondName << std::endl;
+	std::cout << "maxiter=" << maxiter << std::endl;
 	
 	std::string solverName = "jfnk";
 	if (!lua["solver"].isNil()) lua["solver"] >> solverName;	
-	std::cerr << "solver=" << solverName << std::endl;
+	std::cout << "solver=" << solverName << std::endl;
+
+	if (!lua["size"].isNil()) lua["size"] >> size;
+	std::cout << "size=" << size << std::endl;
+
+	if (!lua["xmin"].isNil()) {
+		for (int i = 0; i < 3; ++i) {
+			if (!lua["xmin"][i+1].isNil()) lua["xmin"][i+1] >> xmin(i);
+		}
+	}
+	if (!lua["xmax"].isNil()) {
+		for (int i = 0; i < 3; ++i) {
+			if (!lua["xmax"][i+1].isNil()) lua["xmax"][i+1] >> xmax(i);
+		}
+	}
+
+	sizev = Vector<int, spatialDim>(size, size, size);
+	gridVolume = sizev.volume();
+	dx = (xmax - xmin) / sizev;
 
 	time("allocating", [&]{ allocateGrids(sizev); });
 
 	//specify coordinates
 	time("calculating grid", [&]{
+		RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 			Vector<real, spatialDim>& xi = xs(index);
 			for (int j = 0; j < spatialDim; ++j) {
@@ -879,97 +851,52 @@ int main(int argc, char** argv) {
 
 	//specify stress-energy primitives
 	//the stress-energy primitives combined with the current metric are used to compute the stress-energy tensor 
+	if (!lua["stressEnergyPrims"].isFunction()) throw Common::Exception() << "expected stressEnergyPrims to be defined in config file";
 	time("calculating stress-energy primitives", [&]{
-		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
+		RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
+		//parallel.foreach
+		std::for_each(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
+			Vector<real, spatialDim> xi = xs(index);
 			StressEnergyPrims &stressEnergyPrims = stressEnergyPrimGrid(index);
-			real r = Vector<real, spatialDim>::length(xs(index));
-			stressEnergyPrims.rho = r < radius ? density : 0;	// average density of Earth in m^-2
-			stressEnergyPrims.eInt = 0;	//internal energy / temperature of the Earth?
-			stressEnergyPrims.P = 0;	//pressure inside the Earth?
-			//stressEnergyPrims.E = Tensor<real, Upper<spatialDim>>(0,0,0);	//electric field
-			//stressEnergyPrims.B = Tensor<real, Upper<spatialDim>>(0,0,0);	//magnetic field
+			LuaCxx::Stack stack = lua.stack();
+			stack.getGlobal("stressEnergyPrims").push(xi(0), xi(1), xi(2)).call(3, 12);
+			stack.pop(stressEnergyPrims.rho);
+			stack.pop(stressEnergyPrims.eInt);
+			stack.pop(stressEnergyPrims.P);
+			for (int i = 0; i < spatialDim; ++i) {
+				stack.pop(stressEnergyPrims.v(i));
+			}
+			for (int i = 0; i < spatialDim; ++i) {
+				stack.pop(stressEnergyPrims.E(i));
+			}
+			for (int i = 0; i < spatialDim; ++i) {
+				stack.pop(stressEnergyPrims.B(i));
+			}
 		});
 	});
 
-	{
-		struct {
-			const char* name;
-			std::function<void(Vector<int,spatialDim>)> func;
-		} initConds[] = {
-			{"flat", [&](Vector<int,spatialDim> index){
-				//substitute the schwarzschild R for 2 m(r)
-				MetricPrims& metricPrims = metricPrimGrid(index);
-				metricPrims.ln_alpha = 0;
-				for (int i = 0; i < spatialDim; ++i) {
-					metricPrims.betaU(i) = 0;
-					for (int j = 0; j <= i; ++j) {
-						metricPrims.gammaLL(i,j) = (real)(i == j);
-					}
-				}
-			}},
-			{"stellar", [&](Vector<int,spatialDim> index){
-				MetricPrims& metricPrims = metricPrimGrid(index);
-				Vector<real, spatialDim> xi = xs(index);
-				real r = Vector<real, spatialDim>::length(xi);
-				real matterRadius = std::min<real>(r, radius);
-				real volumeOfMatterRadius = 4/3*M_PI*matterRadius*matterRadius*matterRadius;
-				real m = density * volumeOfMatterRadius;	// m^3		
-				
-				/*
-				g_ti = beta_i = 0
-				g_tt = -alpha^2 + beta^2 = -alpha^2 = -1 + Rs/r <=> alpha = sqrt(1 - Rs/r)
-				g_ij = gamma_ij = delta_ij + x^i x^j / r^2 2M/(r - 2M)		<- but x is upper, and you can't lower it without specifying gamma_ij
-				 ... which might be why the contravariant spatial metrics of spherical and cartesian look so similar 
-				*/
-				/*
-				I'm going by MTW box 23.2 eqn 6 d/dt (proper time) = sqrt(1 - R/r) for r > R
-					and ( 3/2 sqrt(1 - 2 M / R) - 1/2 sqrt(1 - 2 M r^2 / R^3) ) for r < R
-					for M = total mass 
-					and R = planet radius 
-				*/
-				metricPrims.ln_alpha = log(r > radius 
-					? sqrt(1 - 2*mass/r)
-					: (1.5 * sqrt(1 - 2*mass/radius) - .5 * sqrt(1 - 2*mass*r*r/(radius*radius*radius)))
-				);
-				
-				for (int i = 0; i < spatialDim; ++i) {
-					metricPrims.betaU(i) = 0;
-					for (int j = 0; j <= i; ++j) {
-						metricPrims.gammaLL(i,j) = (real)(i == j) + xi(i)/r * xi(j)/r * 2*m/(r - 2*m);
-						/*
-						dr^2's coefficient
-						spherical: 1/(1 - 2M/r) = 1/((r - 2M)/r) = r/(r - 2M)
-						spherical contravariant: 1 - 2M/r
-						cartesian contravariant: delta_ij - x/r y/r 2M/r
-						hmm, contravariant terms of cartesian vs spherical look more similar than covariant terms do
-					
-						in the OV metric, dr^2's coefficient is exp(2 Lambda) = 1/(1 - 2 m(r) / r) where m(r) is the enclosing mass
-						so the contravariant coefficient would be exp(-2 Lambda) = 1 - 2 m(r) / r
-						I'm going to do the lazy thing and guess this converts to delta^ij - 2 m(r) x^i x^j / r^3
-						*/
-					}
-				}
-			}},
-		}, *p;
 
-		std::function<void(Vector<int,spatialDim>)> initCond;
-		for (p = initConds; p < endof(initConds); ++p) {
-			if (p->name == initCondName) {
-				initCond = p->func;
-				break;
+	//initialize metric primitives
+	if (!lua["metricPrims"].isFunction()) throw Common::Exception() << "expected metricPrims to be defined in config file";
+	time("calculating metric primitives", [&]{
+		RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
+		//parallel.foreach
+		std::for_each(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
+			MetricPrims& metricPrims = metricPrimGrid(index);
+			LuaCxx::Stack stack = lua.stack();
+			Vector<real, spatialDim> xi = xs(index);
+			stack.getGlobal("metricPrims").push(xi(0), xi(1), xi(2)).call(3, 10);
+			stack.pop(metricPrims.ln_alpha);
+			for (int i = 0; i < spatialDim; ++i) {
+				stack.pop(metricPrims.betaU(i));
 			}
-		}
-		if (!initCond) {
-			throw Common::Exception() << "couldn't find initial condition named " << initCondName;
-		}
-
-		//initialize metric primitives
-		time("calculating metric primitives", [&]{
-			parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
-				initCond(index);
-			});
+			for (int i = 0; i < spatialDim; ++i) {
+				for (int j = 0; j <= i; ++j) {
+					stack.pop(metricPrims.gammaLL(i,j));
+				}
+			}
 		});
-	}
+	});
 
 	std::shared_ptr<EFESolver> solver;
 	{
@@ -1010,6 +937,7 @@ int main(int argc, char** argv) {
 
 	Grid<real, spatialDim> numericalGravity(sizev);
 	time("calculating numerical gravitational force", [&]{
+		RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 			Vector<real, spatialDim> xi = xs(index);
 			real r = Vector<real, spatialDim>::length(xi);
@@ -1034,26 +962,19 @@ int main(int argc, char** argv) {
 #endif
 		});
 	});
-
+	
+	std::cout << "initializing..." << std::endl;
+	
+	if (!lua["analyticalGravity"].isFunction()) throw Common::Exception() << "expected analyticalGravity to be defined in config file";
 	Grid<real, spatialDim> analyticalGravity(sizev);
 	time("calculating analytical gravitational force", [&]{
-		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
+		RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
+		//parallel.foreach
+		std::for_each(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
+			LuaCxx::Stack stack = lua.stack();
 			Vector<real, spatialDim> xi = xs(index);
-			real r = Vector<real, spatialDim>::length(xi);
-			//substitute the schwarzschild R for 2 m(r)
-			real matterRadius = std::min<real>(r, radius);
-			real volumeOfMatterRadius = 4/3*M_PI*matterRadius*matterRadius*matterRadius;
-			real m = density * volumeOfMatterRadius;	// m^3
-
-			//now that I'm using the correct alpha equation, my dm/dr term is causing the analytical gravity calculation to be off ...
-			//real dm_dr = r > radius ? 0 : density * 4 * M_PI * matterRadius * matterRadius;
-			// ... maybe it shouldn't be there to begin with?
-			real dm_dr = 0;
-			real GammaUr_tt = (2*m * (r - 2*m) + 2 * dm_dr * r * (2*m - r)) / (2 * r * r * r)
-				* c * c;	//+9 at earth surface, without matter derivatives
-
-			//acceleration is -Gamma^r_tt along the radial direction (i.e. upwards from the surface), or Gamma^r_tt downward into the surface
-			analyticalGravity(index) = GammaUr_tt;
+			stack.getGlobal("analyticalGravity").push(xi(0), xi(1), xi(2)).call(3, 1);
+			stack.pop(analyticalGravity(index));
 		});
 	});
 
@@ -1101,29 +1022,40 @@ int main(int argc, char** argv) {
 			}},
 		};
 
-		printf("#");
-		{
-			const char* tab = "";
-			for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {
-				printf("%s%s", tab, p->name.c_str());
-				tab = "\t";
-			}
-		}
-		printf("\n");
-		fflush(stdout);
-		time("outputting", [&]{
-			//this is printing output, so don't do it in parallel		
-			for (RangeObj<spatialDim>::iterator iter = range.begin(); iter != range.end(); ++iter) {
+		if (!lua["outputFilename"].isNil()) {
+			std::string outputFilename;
+			lua["outputFilename"] >> outputFilename;
+
+			FILE* file = fopen(outputFilename.c_str(), "w");
+			if (!file) throw Common::Exception() << "failed to open file " << outputFilename;
+
+			fprintf(file, "#");
+			{
 				const char* tab = "";
 				for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {
-					printf("%s%.16e", tab, p->func(iter.index));
+					fprintf(file, "%s%s", tab, p->name.c_str());
 					tab = "\t";
 				}
-				printf("\n");
-				fflush(stdout);
 			}
-		});
+			fprintf(file, "\n");
+			fflush(file);
+			time("outputting", [&]{
+				//this is printing output, so don't do it in parallel		
+				RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
+				for (RangeObj<spatialDim>::iterator iter = range.begin(); iter != range.end(); ++iter) {
+					const char* tab = "";
+					for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {
+						fprintf(file, "%s%.16e", tab, p->func(iter.index));
+						tab = "\t";
+					}
+					fprintf(file, "\n");
+					fflush(file);
+				}
+			});
+		
+			fclose(file);
+		}
 	}
 	
-	std::cerr << "done!" << std::endl;
+	std::cout << "done!" << std::endl;
 }

@@ -6,3 +6,5 @@ solver = 'conjgrad'
 
 --initCond = 'flat'
 initCond = 'stellar'
+
+outputFilename = 'out.txt'

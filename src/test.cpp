@@ -22,13 +22,13 @@ might get into trouble ensuring the hamiltonian or momentum constraints are fulf
 Parallel::Parallel parallel(8);
 
 void time(const std::string name, std::function<void()> f) {
-	std::cerr << name << " ... ";
-	std::cerr.flush();
+	std::cout << name << " ... ";
+	std::cout.flush();
 	auto start = std::chrono::high_resolution_clock::now();
 	f();
 	auto end = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> diff = end - start;
-	std::cerr << "(" << diff.count() << "s)" << std::endl;
+	std::cout << "(" << diff.count() << "s)" << std::endl;
 }
 
 //opposite upper/lower of what is already in Tensor/Inverse.h
@@ -192,12 +192,12 @@ template<typename CellType>
 void allocateGrid(Grid<CellType, spatialDim>& grid, std::string name, Vector<int, spatialDim> sizev, size_t& totalSize) {
 	size_t size = sizeof(CellType) * sizev.volume();
 	totalSize += size;
-	std::cerr << name << ": " << size << " bytes, running total: " << totalSize << std::endl;
+	std::cout << name << ": " << size << " bytes, running total: " << totalSize << std::endl;
 	grid.resize(sizev);
 }
 
 void allocateGrids(Vector<int, spatialDim> sizev) {
-	std::cerr << std::endl;
+	std::cout << std::endl;
 	size_t totalSize = 0;
 	allocateGrid(xs, "xs", sizev, totalSize);
 	allocateGrid(stressEnergyPrimGrid, "stressEnergyPrimGrid", sizev, totalSize);
@@ -658,7 +658,7 @@ struct KrylovSolver : public EFESolver {
 
 	void linearFunc(real* y, const real* x) {
 #ifdef PRINTTIME
-		std::cerr << "iteration " << jfnk.iter << std::endl;
+		std::cout << "iteration " << jfnk.iter << std::endl;
 		time("calculating g_ab and g^ab", [&](){
 #endif				
 			calc_gLLs_and_gUUs(x);
@@ -700,8 +700,7 @@ struct KrylovSolver : public EFESolver {
 			}
 		};*/
 		krylov->stopCallback = [&]()->bool{
-			fprintf(stderr, "%s iter %d residual %.49e\n", name(), krylov->iter, krylov->residual);
-			fflush(stderr);
+			printf("%s iter %d residual %.49e\n", name(), krylov->iter, krylov->residual);
 			return false;
 		};
 		time("solving", [&](){
@@ -786,7 +785,7 @@ struct JFNKSolver : public EFESolver {
 			[&](real* y, const real* x) {	//A = vector function to minimize
 
 #ifdef PRINTTIME
-				std::cerr << "iteration " << jfnk.iter << std::endl;
+				std::cout << "iteration " << jfnk.iter << std::endl;
 				time("calculating g_ab and g^ab", [&](){
 #endif				
 				calc_gLLs_and_gUUs(x);
@@ -833,13 +832,11 @@ struct JFNKSolver : public EFESolver {
 				if (jfnk.residual != jfnk.residual) jfnk.residual = std::numeric_limits<real>::max();
 			}
 			
-			fprintf(stderr, "jfnk iter %d alpha %f residual %.16f\n", jfnk.iter, jfnk.alpha, jfnk.residual);
-			fflush(stderr);
+			printf("jfnk iter %d alpha %f residual %.16f\n", jfnk.iter, jfnk.alpha, jfnk.residual);
 			return false;
 		};
 		jfnk.gmres.stopCallback = [&]()->bool{
-			fprintf(stderr, "gmres iter %d residual %.16f\n", jfnk.gmres.iter, jfnk.gmres.residual);
-			fflush(stderr);
+			printf("gmres iter %d residual %.16f\n", jfnk.gmres.iter, jfnk.gmres.residual);
 			return false;
 		};
 		
@@ -855,15 +852,15 @@ int main(int argc, char** argv) {
 	
 	int maxiter = std::numeric_limits<int>::max();
 	if (!lua["maxiter"].isNil()) lua["maxiter"] >> maxiter;	
-	std::cerr << "maxiter=" << maxiter << std::endl;
+	std::cout << "maxiter=" << maxiter << std::endl;
 	
 	std::string initCondName = "stellar";
 	if (!lua["initCond"].isNil()) lua["initCond"] >> initCondName;
-	std::cerr << "initCond=" << initCondName << std::endl;
+	std::cout << "initCond=" << initCondName << std::endl;
 	
 	std::string solverName = "jfnk";
 	if (!lua["solver"].isNil()) lua["solver"] >> solverName;	
-	std::cerr << "solver=" << solverName << std::endl;
+	std::cout << "solver=" << solverName << std::endl;
 
 	time("allocating", [&]{ allocateGrids(sizev); });
 
@@ -1101,29 +1098,37 @@ int main(int argc, char** argv) {
 			}},
 		};
 
-		printf("#");
-		{
-			const char* tab = "";
-			for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {
-				printf("%s%s", tab, p->name.c_str());
-				tab = "\t";
-			}
-		}
-		printf("\n");
-		fflush(stdout);
-		time("outputting", [&]{
-			//this is printing output, so don't do it in parallel		
-			for (RangeObj<spatialDim>::iterator iter = range.begin(); iter != range.end(); ++iter) {
+		if (!lua["outputFilename"].isNil()) {
+			std::string outputFilename;
+			lua["outputFilename"] >> outputFilename;
+
+			FILE* file = fopen(outputFilename.c_str(), "w");
+			if (!file) throw Common::Exception() << "failed to open file " << outputFilename;
+
+			fprintf(file, "#");
+			{
 				const char* tab = "";
 				for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {
-					printf("%s%.16e", tab, p->func(iter.index));
+					fprintf(file, "%s%s", tab, p->name.c_str());
 					tab = "\t";
 				}
-				printf("\n");
-				fflush(stdout);
 			}
-		});
+			fprintf(file, "\n");
+			time("outputting", [&]{
+				//this is printing output, so don't do it in parallel		
+				for (RangeObj<spatialDim>::iterator iter = range.begin(); iter != range.end(); ++iter) {
+					const char* tab = "";
+					for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {
+						fprintf(file, "%s%.16e", tab, p->func(iter.index));
+						tab = "\t";
+					}
+					fprintf(file, "\n");
+				}
+			});
+		
+			fclose(file);
+		}
 	}
 	
-	std::cerr << "done!" << std::endl;
+	std::cout << "done!" << std::endl;
 }

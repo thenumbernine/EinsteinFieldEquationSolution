@@ -378,98 +378,127 @@ function App:update()
 
 	if showGradTrace[0] or showCurlTrace[0] then
 		gl.glDisable(gl.GL_DEPTH_TEST)
-	
-		self.wireLists = self.wireLists or {}
-		self.wireLists[col[0]] = self.wireLists[col[0]] or {}
-		glcall(self.wireLists[col[0]], function()
-			
-			-- TODO
-			-- 1) space out seeds
-			-- 2) integrate rk4 or something the lines
-			local divs = 8
-			for i=1,self.max[1]-1,(self.max[1]+1)/divs do
-				for j=1,self.max[2]-1,(self.max[2]+1)/divs do
-					for k=1,self.max[3]-1,(self.max[3]+1)/divs do
 
-						local function trace(x, dir)
-							gl.glBegin(gl.GL_LINE_STRIP)
-							local lastdx
-							while true do
-								local function intx(x)
-									local i = vec3(math.floor(x[1]), math.floor(x[2]), math.floor(x[3]))
-									if i[1] < 1 or i[1] > self.max[1]-2
-									or i[2] < 1 or i[2] > self.max[2]-2
-									or i[3] < 1 or i[3] > self.max[3]-2
-									then
-										return
-									end
-									return i
-								end
-								local function dx_ds(x)
-									local i = intx(x)
-									if not i then return end
-									local f = x - i
+		self.gradLists = self.gradLists or {}
+		self.gradLists[col[0]] = self.gradLists[col[0]] or {}
+		
+		self.curlLists = self.curlLists or {}
+		self.curlLists[col[0]] = self.curlLists[col[0]] or {}
+		
+		for curl=0,1 do
+			if (curl==0 and showGradTrace[0]) or (curl==1 and showCurlTrace[0]) then
+				glcall(curl==0 and self.gradLists[col[0]] or self.curlLists[col[0]], function()
+					-- TODO
+					-- 1) space out seeds
+					-- 2) integrate rk4 or something the lines
+					local divs = 16
+					for i=1,self.max[1]-1,(self.max[1]+1)/divs do
+						for j=1,self.max[2]-1,(self.max[2]+1)/divs do
+							for k=1,self.max[3]-1,(self.max[3]+1)/divs do
+								local function trace(x, dir)
+									gl.glBegin(gl.GL_LINE_STRIP)
+									local lastdx
+									local lastT
+									while true do
+										local function intx(x)
+											local i = vec3(math.floor(x[1]), math.floor(x[2]), math.floor(x[3]))
+											if i[1] < 1 or i[1] > self.max[1]-2
+											or i[2] < 1 or i[2] > self.max[2]-2
+											or i[3] < 1 or i[3] > self.max[3]-2
+											then
+												return
+											end
+											return i
+										end
+										local dx_ds = function(x)
+											local i = intx(x)
+											if not i then return end
+											local f = x - i
+											
+											local indexm = 1 + i[1] + (self.max[1] + 1) * (i[2] + (self.max[2] + 1) * i[3])
+											assert(indexm >= 1 and indexm <= #self.pts, "failed for i="..i.." x="..x)
+											local dxm = vec3(
+												self.pts[indexm + 1][col[0]] - self.pts[indexm - 1][col[0]],
+												self.pts[indexm + self.max[1] + 1][col[0]] - self.pts[indexm - self.max[1] - 1][col[0]],
+												self.pts[indexm+(self.max[1]+1)*(self.max[2]+1)][col[0]]-self.pts[indexm-(self.max[1]+1)*(self.max[2]+1)][col[0]])
+											local indexp = 1 + i[1]+1 + (self.max[1] + 1) * (i[2]+1 + (self.max[2] + 1) * (i[3]+1))
+											assert(indexp >= 1 and indexp <= #self.pts, "failed for i="..i.." x="..x)
+											local dxp = vec3(
+												self.pts[indexp + 1][col[0]] - self.pts[indexp - 1][col[0]],
+												self.pts[indexp + self.max[1] + 1][col[0]] - self.pts[indexp - self.max[1] - 1][col[0]],
+												self.pts[indexp+(self.max[1]+1)*(self.max[2]+1)][col[0]]-self.pts[indexp-(self.max[1]+1)*(self.max[2]+1)][col[0]])
 									
-									local indexm = 1 + i[1] + (self.max[1] + 1) * (i[2] + (self.max[2] + 1) * i[3])
-									assert(indexm >= 1 and indexm <= #self.pts, "failed for i="..i.." x="..x)
-									local dxm = vec3(
-										self.pts[indexm + 1][col[0]] - self.pts[indexm - 1][col[0]],
-										self.pts[indexm + self.max[1] + 1][col[0]] - self.pts[indexm - self.max[1] - 1][col[0]],
-										self.pts[indexm+(self.max[1]+1)*(self.max[2]+1)][col[0]]-self.pts[indexm-(self.max[1]+1)*(self.max[2]+1)][col[0]])
-									local indexp = 1 + i[1]+1 + (self.max[1] + 1) * (i[2]+1 + (self.max[2] + 1) * (i[3]+1))
-									assert(indexp >= 1 and indexp <= #self.pts, "failed for i="..i.." x="..x)
-									local dxp = vec3(
-										self.pts[indexp + 1][col[0]] - self.pts[indexp - 1][col[0]],
-										self.pts[indexp + self.max[1] + 1][col[0]] - self.pts[indexp - self.max[1] - 1][col[0]],
-										self.pts[indexp+(self.max[1]+1)*(self.max[2]+1)][col[0]]-self.pts[indexp-(self.max[1]+1)*(self.max[2]+1)][col[0]])
-								
-									local dx = vec3(
-										dxm[1] * (1 - f[1]) + dxp[1] * f[1],
-										dxm[2] * (1 - f[2]) + dxp[2] * f[2],
-										dxm[3] * (1 - f[3]) + dxp[3] * f[3])
-									local len = dx:length()
-									if len < 1e-20 then return end
-									return dx / len
+											-- one vector field is along the gradient ... the B field ...
+											-- the E field goes around ... normal to the plane of curvature of the B field? Frenet frame
+											-- the S vector is E x B
+
+											local dx = vec3(
+												dxm[1] * (1 - f[1]) + dxp[1] * f[1],
+												dxm[2] * (1 - f[2]) + dxp[2] * f[2],
+												dxm[3] * (1 - f[3]) + dxp[3] * f[3])
+											local len = dx:length()
+											if len < 1e-20 then return end
+											return dx / len
+										end
+										
+										local h = 1/(self.max[1]+1)
+										
+										if curl==1 then
+											local T_of_x = dx_ds
+											dx_ds = function(x)
+												local T = T_of_x(x)
+												if not T then return lastT end
+												local Tp = T_of_x(x + T*h)
+												if not Tp then return lastT end
+												local Tm = T_of_x(x - T*h)
+												if not Tm then return lastT end
+												local N = Tm:cross(Tp)
+												local len = N:length()
+												if len < 1e-20 then return lastT end
+												return N / len
+											end
+										end
+
+										-- [[ euler
+										local dx = dx_ds(x)
+										if not dx then break end
+										if curl==1 then lastT = dx end
+										dx = dx * h
+										--]]
+										--[[ rk4
+										local k1 = dx_ds(x)
+										if not k1 then break end
+										local k2 = dx_ds(x + k1 * (h/2))
+										if not k2 then break end
+										local k3 = dx_ds(x + k2 * (h/2))
+										if not k3 then break end
+										local k4 = dx_ds(x + k3 * h)
+										if not k4 then break end
+										local dx = k1*(h/6) + k2*(h/3) + k3*(h/3) + k4*(h/6)
+										--]]
+										if lastdx and dx:dot(lastdx) < 1e-20 then break end
+										lastdx = dx
+										x = x + dx * dir
+										if not intx(x) then break end
+										if not math.isfinite(x[1]) or not math.isfinite(x[2]) or not math.isfinite(x[3]) then break end
+
+										gl.glVertex3d(
+											(x[1]+.5)/(self.max[1]+1),
+											(x[2]+.5)/(self.max[2]+1),
+											(x[3]+.5)/(self.max[3]+1))
+									end
+									gl.glEnd()
 								end
 
-								local h = 1/(self.max[1]+1)
-								-- [[ euler
-								local dx = dx_ds(x)
-								if not dx then break end
-								dx = dx * h
-								--]]
-								--[[ rk4
-								local k1 = dx_ds(x)
-								if not k1 then break end
-								local k2 = dx_ds(x + k1 * (h/2))
-								if not k2 then break end
-								local k3 = dx_ds(x + k2 * (h/2))
-								if not k3 then break end
-								local k4 = dx_ds(x + k3 * h)
-								if not k4 then break end
-								local dx = k1*(h/6) + k2*(h/3) + k3*(h/3) + k4*(h/6)
-								--]]
-								if lastdx and dx:dot(lastdx) < 1e-20 then break end
-								lastdx = dx
-								x = x + dx * dir
-								if not intx(x) then break end
-								if not math.isfinite(x[1]) or not math.isfinite(x[2]) or not math.isfinite(x[3]) then break end
-
-								gl.glVertex3d(
-									(x[1]+.5)/(self.max[1]+1),
-									(x[2]+.5)/(self.max[2]+1),
-									(x[3]+.5)/(self.max[3]+1))
+								local pt = vec3(i+.5,j+.5,k+.5)
+								trace(pt, 1)
+								trace(pt, -1)
 							end
-							gl.glEnd()
 						end
-
-						local pt = vec3(i+.5,j+.5,k+.5)
-						trace(pt, 1)
-						trace(pt, -1)
 					end
-				end
+				end)
 			end
-		end)
+		end
 		gl.glEnable(gl.GL_DEPTH_TEST)
 	end
 

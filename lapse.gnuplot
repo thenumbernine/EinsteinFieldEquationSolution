@@ -35,6 +35,9 @@ alpha(r) = r > R ? sqrt(1. - 2.*M/r) : (1.5*sqrt(1. - 2.*M/R) - .5*sqrt(1. - 2.*
 # derivative of lapse wrt radius
 dalpha_dr(r) = r > R ? (M / (r * r * sqrt(1. - 2.*M/r))) : M*r/(R*R*R*sqrt(1. - 2.*M*r*r/(R*R*R)))
 
+# metric, based on g_tt = -alpha^2 + beta^2 and assuming beta=0
+g_tt(r) = -alpha(r)**2
+
 dx = R/1000.
-plot [0:R*10.] alpha(x), dalpha_dr(x), (alpha(x+dx) - alpha(x-dx)) / (2.*dx)
+plot [0:R*10.] alpha(x) title 'alpha', dalpha_dr(x) title 'dalpha/dr', (alpha(x+dx) - alpha(x-dx)) / (2.*dx) title 'dalpha/dr discrete', g_tt(x) title 'g_t_t'
 #plot [0:R*10.] log(alpha(x))

@@ -73,10 +73,10 @@ Tensor<real, Upper<3>> cross(Tensor<real, Upper<3>> a, Tensor<real, Upper<3>> b)
 //variables used to build the metric 
 //dim * (dim+1) / 2 vars
 struct MetricPrims {
-	real ln_alpha;
+	real alpha;
 	Tensor<real, Upper<spatialDim>> betaU;
 	Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>> gammaLL;
-	MetricPrims() : ln_alpha(0) {}
+	MetricPrims() : alpha(1) {}
 };
 
 //variables used to build the stress-energy tensor
@@ -224,7 +224,7 @@ void calc_gLLs_and_gUUs(const real* x) {
 		const Tensor<real, Upper<spatialDim>> &betaU = metricPrims.betaU;
 		const Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>> &gammaLL = metricPrims.gammaLL;
 
-		real alpha = exp(metricPrims.ln_alpha);
+		real alpha = metricPrims.alpha;
 		real alphaSq = alpha * alpha;
 
 		Tensor<real, Lower<spatialDim>> betaL;
@@ -441,7 +441,7 @@ void calc_EinsteinLLs(real* y) {
 
 //based on 
 Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_8piTLL(Vector<int,spatialDim> index, const MetricPrims& metricPrims) {
-	real alpha = exp(metricPrims.ln_alpha);
+	real alpha = metricPrims.alpha;
 	real alphaSq = alpha * alpha;
 	const Tensor<real, Upper<spatialDim>> &betaU = metricPrims.betaU;
 	const Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>> &gammaLL = metricPrims.gammaLL;
@@ -810,27 +810,11 @@ struct JFNKSolver : public EFESolver {
 			getN()				//gmres restart iter
 #endif
 #if 1	//so I'm doing this instead:
-			getN() * 10,	//gmres max maxiter
-			100					//gmres restart iter
+			getN(),				//gmres max maxiter
+			10					//gmres restart iter
 #endif
 		);
 		jfnk.stopCallback = [&]()->bool{
-			
-			bool constrained = false;
-			for (MetricPrims* i = metricPrimGrid.v; i != metricPrimGrid.end(); ++i) {
-				if (i->ln_alpha < 0) {
-					i->ln_alpha = 0;
-					constrained = true;
-				}
-			}
-			//if we had to constrain our answer -- then recalculate the residual
-			//TODO split this from residualAtAlpha?
-			if (constrained) {
-				jfnk.F(jfnk.F_of_x, jfnk.x);
-				jfnk.residual = Solvers::Vector<real>::normL2(jfnk.n, jfnk.F_of_x) / (real)jfnk.n;
-				if (jfnk.residual != jfnk.residual) jfnk.residual = std::numeric_limits<real>::max();
-			}
-			
 			printf("jfnk iter %d alpha %f residual %.16f\n", jfnk.iter, jfnk.alpha, jfnk.residual);
 			return false;
 		};
@@ -910,7 +894,7 @@ int main(int argc, char** argv) {
 			{"flat", [&](Vector<int,spatialDim> index){
 				//substitute the schwarzschild R for 2 m(r)
 				MetricPrims& metricPrims = metricPrimGrid(index);
-				metricPrims.ln_alpha = 0;
+				metricPrims.alpha = 1;
 				for (int i = 0; i < spatialDim; ++i) {
 					metricPrims.betaU(i) = 0;
 					for (int j = 0; j <= i; ++j) {
@@ -938,10 +922,9 @@ int main(int argc, char** argv) {
 					for M = total mass 
 					and R = planet radius 
 				*/
-				metricPrims.ln_alpha = log(r > radius 
+				metricPrims.alpha = r > radius 
 					? sqrt(1 - 2*mass/r)
-					: (1.5 * sqrt(1 - 2*mass/radius) - .5 * sqrt(1 - 2*mass*r*r/(radius*radius*radius)))
-				);
+					: (1.5 * sqrt(1 - 2*mass/radius) - .5 * sqrt(1 - 2*mass*r*r/(radius*radius*radius)));
 				
 				for (int i = 0; i < spatialDim; ++i) {
 					metricPrims.betaU(i) = 0;
@@ -991,8 +974,8 @@ int main(int argc, char** argv) {
 		} solvers[] = {
 			{"jfnk", [&](){ return std::make_shared<JFNKSolver>(maxiter); }},
 			{"gmres", [&](){ return std::make_shared<GMResSolver>(maxiter); }},
-			{"conjgrad", [&](){ return std::make_shared<ConjResSolver>(maxiter); }},
-			{"conjres", [&](){ return std::make_shared<ConjGradSolver>(maxiter); }},
+			{"conjres", [&](){ return std::make_shared<ConjResSolver>(maxiter); }},
+			{"conjgrad", [&](){ return std::make_shared<ConjGradSolver>(maxiter); }},
 		}, *p;
 		for (p = solvers; p < endof(solvers); ++p) {
 			if (p->name == solverName) {
@@ -1081,8 +1064,8 @@ int main(int argc, char** argv) {
 			{"iy", [&](Vector<int,spatialDim> index)->real{ return index(1); }},
 			{"iz", [&](Vector<int,spatialDim> index)->real{ return index(2); }},
 			{"rho", [&](Vector<int,spatialDim> index)->real{ return stressEnergyPrimGrid(index).rho; }},
-			{"det", [&](Vector<int,spatialDim> index)->real{ return -1 + determinant33<real, Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>>>(metricPrimGrid(index).gammaLL); }},
-			{"ln(alpha)", [&](Vector<int,spatialDim> index)->real{ return metricPrimGrid(index).ln_alpha; }},
+			{"det-1", [&](Vector<int,spatialDim> index)->real{ return -1 + determinant33<real, Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>>>(metricPrimGrid(index).gammaLL); }},
+			{"alpha-1", [&](Vector<int,spatialDim> index)->real{ return -1 + metricPrimGrid(index).alpha; }},
 #if 0	//within 1e-23			
 			{"ortho_error", [&](Vector<int,spatialDim> index)->real{
 				const Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> &gLL = gLLs(index);

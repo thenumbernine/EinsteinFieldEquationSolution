@@ -1,11 +1,12 @@
-maxiter = 100
+maxiter = 0
 
 --initCond = 'flat'
 initCond = 'stellar'
 
 --solver = 'conjgrad'
-solver = 'conjres'
+--solver = 'conjres'
 --solver = 'gmres'
+solver = 'jfnk'
 
 size = 16
 

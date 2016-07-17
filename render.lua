@@ -51,7 +51,8 @@ end)
 
 local alpha = ffi.new('float[1]', 1.5e-1)
 local alphaGamma = ffi.new('float[1]', 1)
-local showTrace = ffi.new('bool[1]', false)
+local showGradTrace = ffi.new('bool[1]', false)
+local showCurlTrace = ffi.new('bool[1]', false)
 
 function App:initGL()
 	App.super.initGL(self)
@@ -375,7 +376,7 @@ function App:update()
 	tex:unbind(0)
 	volumeShader:useNone()
 
-	if showTrace[0] then
+	if showGradTrace[0] or showCurlTrace[0] then
 		gl.glDisable(gl.GL_DEPTH_TEST)
 	
 		self.wireLists = self.wireLists or {}
@@ -432,7 +433,12 @@ function App:update()
 								end
 
 								local h = 1/(self.max[1]+1)
-								-- rk4
+								-- [[ euler
+								local dx = dx_ds(x)
+								if not dx then break end
+								dx = dx * h
+								--]]
+								--[[ rk4
 								local k1 = dx_ds(x)
 								if not k1 then break end
 								local k2 = dx_ds(x + k1 * (h/2))
@@ -442,6 +448,7 @@ function App:update()
 								local k4 = dx_ds(x + k3 * h)
 								if not k4 then break end
 								local dx = k1*(h/6) + k2*(h/3) + k3*(h/3) + k4*(h/6)
+								--]]
 								if lastdx and dx:dot(lastdx) < 1e-20 then break end
 								lastdx = dx
 								x = x + dx * dir
@@ -508,7 +515,8 @@ function App:updateGUI()
 		ig.igRadioButton('rotate', rotateClip, i)
 		ig.igPopId()
 	end
-	ig.igCheckbox('show trace', showTrace)
+	ig.igCheckbox('show gradient trace', showGradTrace)
+	ig.igCheckbox('show curl trace', showCurlTrace)
 end
 
 local app = App()

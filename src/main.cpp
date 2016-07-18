@@ -846,7 +846,7 @@ int main(int argc, char** argv) {
 	if (!lua["maxiter"].isNil()) lua["maxiter"] >> maxiter;	
 	std::cout << "maxiter=" << maxiter << std::endl;
 	
-	std::string initCondName = "stellar";
+	std::string initCondName = "stellar_schwarzschild";
 	if (!lua["initCond"].isNil()) lua["initCond"] >> initCondName;
 	std::cout << "initCond=\"" << initCondName << "\"" << std::endl;
 	
@@ -918,12 +918,12 @@ int main(int argc, char** argv) {
 			}},
 			
 			/*
-			The stellar initial conditions have constraint value of zero outside Earth (good)
+			The stellar Schwarzschild initial conditions have constraint value of zero outside Earth (good)
 			but inside Earth they give a difference of 2 g/cm^3 ... off from the Earth's density of 5.51 g/cm^3
 			*/
-			{"stellar", [&](Vector<int,spatialDim> index){
+			{"stellar_schwarzschild", [&](Vector<int,spatialDim> index){
 				MetricPrims& metricPrims = metricPrimGrid(index);
-				Vector<real, spatialDim> xi = xs(index);
+				const Vector<real, spatialDim>& xi = xs(index);
 				real r = Vector<real, spatialDim>::length(xi);
 				real matterRadius = std::min<real>(r, radius);
 				real volumeOfMatterRadius = 4./3.*M_PI*matterRadius*matterRadius*matterRadius;
@@ -960,6 +960,59 @@ int main(int argc, char** argv) {
 						so the contravariant coefficient would be exp(-2 Lambda) = 1 - 2 m(r) / r
 						I'm going to do the lazy thing and guess this converts to delta^ij - 2 m(r) x^i x^j / r^3
 						*/
+					}
+				}
+			}},
+		
+			{"stellar_kerr_newman", [&](Vector<int,spatialDim> index){
+				MetricPrims& metricPrims = metricPrimGrid(index);
+				const Vector<real,spatialDim>& xi = xs(index);
+				
+				real x = xi(0);
+				real y = xi(1);
+				real z = xi(2);
+				
+				real angularVelocity = 2. * M_PI / (60. * 60. * 24.) / c;	//angular velocity, in m^-1
+				real inertia = 2. / 5. * mass * radius * radius;	//moment of inertia about a sphere, in m^3
+				real angularMomentum = inertia * angularVelocity;	//angular momentum in m^2
+				real a = angularMomentum / mass;	//m
+				
+				//real r is the solution of (x*x + y*y) / (r*r + a*a) + z*z / (r*r) = 1 
+				// r^4 - (x^2 + y^2 + z^2 - a^2) r^2 - a^2 z^2 = 0
+				real r;
+				{
+					real b = a*a - x*x - y*y - z*z;
+					real sqrtDiscr = sqrt(b*b - 4.*(-a*a*z*z));
+					//so we have two solutions ... which do we use? 
+					//from gnuplot it looks like the two of these are the same ...
+					real rSqPlus = (-b + sqrtDiscr) / 2.;
+					real rSqMinus = (-b - sqrtDiscr) / 2.;
+					real rSq = rSqPlus;
+					r = sqrt(rSq);
+				}
+
+				//should I use the Kerr-Schild 'r' coordinate?
+				//well, if 'm' is the mass enclosed within the coordinate
+				// and that determines 'a', the angular momentum per mass within the coordinate (should it?)
+				// then we would have a circular definition
+				//real R = sqrt(x*x + y*y + z*z); 
+				real matterRadius = std::min<real>(r, radius);
+				real volumeOfMatterRadius = 4./3.*M_PI*matterRadius*matterRadius*matterRadius;
+				real m = density * volumeOfMatterRadius;	// m^3
+
+				real Q = 0;	//charge
+				real H = (r*m - Q*Q/2.)/(r*r + a*a*z*z/(r*r));
+			
+				//3.4.33 through 3.4.35 of Alcubierre "Introduction to 3+1 Numerical Relativity"
+				
+				//TODO fix this for the metric within the star
+				metricPrims.alpha = 1./sqrt(1. + 2*H);
+				
+				Vector<real,spatialDim> l( (r*x + a*y)/(r*r + a*a), (r*y - a*x)/(r*r + a*a), z/r );
+				for (int i = 0; i < spatialDim; ++i) {
+					metricPrims.betaU(i) = 2. * H * l(i) / (1. + 2. * H);
+					for (int j = 0; j <= i; ++j) {
+						metricPrims.gammaLL(i,j) = (real)(i == j) + 2 * H * l(i) * l(j); 
 					}
 				}
 			}},

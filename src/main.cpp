@@ -156,10 +156,11 @@ const real mass = 5.9736e+24 * G / c / c;	// m
 const real radius = 6.960e+8;	// m
 const real mass = 1.9891e+30 * G / c / c;	// m
 #endif
-const real volume = 4/3*M_PI*radius*radius*radius;	// m^3
+const real volume = 4./3.*M_PI*radius*radius*radius;	// m^3
 //earth volume: 1.0832120174985e+21 m^3
 const real density = mass / volume;	// 1/m^2
-//earth density: 4.0950296770075e-24 1/m^2
+//earth density: 4.0950296770075e-24 1/m^2 = 5.5147098661212 g/cm^3, which is what Google says.
+//note that G_tt = 8 pi T_tt = 8 pi rho ... for earth = 1.0291932119615e-22 m^-2
 //const real schwarzschildRadius = 2 * mass;	//Schwarzschild radius: 8.87157 mm, which is accurate
 
 //earth magnetic field at surface: .25-.26 gauss
@@ -585,6 +586,8 @@ Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_8piTLL(Vector<int,spatialDi
 	return T_LL;
 }
 
+//x holds metric primitive (alpha, beta^i, gamma_ij)
+//y returns G_ab - 8 pi T_ab
 void calc_EFE_constraint(real* y, const real* x) {
 	RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
@@ -829,7 +832,13 @@ struct JFNKSolver : public EFESolver {
 	}
 };
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv) {	
+
+	std::cout << "mass=" << mass << std::endl;		//m
+	std::cout << "radius=" << radius << std::endl;	//m
+	std::cout << "volume=" << volume << std::endl;	//m^3
+	std::cout << "density=" << density << std::endl;	//m^-2
+
 	LuaCxx::State lua;
 	lua.loadFile("config.lua");
 	
@@ -839,17 +848,19 @@ int main(int argc, char** argv) {
 	
 	std::string initCondName = "stellar";
 	if (!lua["initCond"].isNil()) lua["initCond"] >> initCondName;
-	std::cout << "initCond=" << initCondName << std::endl;
+	std::cout << "initCond=\"" << initCondName << "\"" << std::endl;
 	
 	std::string solverName = "jfnk";
 	if (!lua["solver"].isNil()) lua["solver"] >> solverName;	
-	std::cout << "solver=" << solverName << std::endl;
+	std::cout << "solver=\"" << solverName << "\"" << std::endl;
 
 	int size = 16;
 	if (!lua["size"].isNil()) lua["size"] >> size;
+	std::cout << "size=" << size << std::endl;
 
 	real bodyRadii = 2;
 	if (!lua["bodyRadii"].isNil()) lua["bodyRadii"] >> bodyRadii;
+	std::cout << "bodyRadii=" << bodyRadii << std::endl;
 
 	xmin = Vector<real, spatialDim>(-bodyRadii*radius, -bodyRadii*radius, -bodyRadii*radius),
 	xmax = Vector<real, spatialDim>(bodyRadii*radius, bodyRadii*radius, bodyRadii*radius);
@@ -881,8 +892,11 @@ int main(int argc, char** argv) {
 			stressEnergyPrims.rho = r < radius ? density : 0;	// average density of Earth in m^-2
 			stressEnergyPrims.eInt = 0;	//internal energy / temperature of the Earth?
 			stressEnergyPrims.P = 0;	//pressure inside the Earth?
-			//stressEnergyPrims.E = Tensor<real, Upper<spatialDim>>(0,0,0);	//electric field
-			//stressEnergyPrims.B = Tensor<real, Upper<spatialDim>>(0,0,0);	//magnetic field
+			for (int i = 0; i < spatialDim; ++i) {
+				stressEnergyPrims.v(i) = 0;	//3-velocity
+				stressEnergyPrims.E(i) = 0;	//electric field
+				stressEnergyPrims.B(i) = 0;	//magnetic field
+			}
 		});
 	});
 
@@ -902,12 +916,17 @@ int main(int argc, char** argv) {
 					}
 				}
 			}},
+			
+			/*
+			The stellar initial conditions have constraint value of zero outside Earth (good)
+			but inside Earth they give a difference of 2 g/cm^3 ... off from the Earth's density of 5.51 g/cm^3
+			*/
 			{"stellar", [&](Vector<int,spatialDim> index){
 				MetricPrims& metricPrims = metricPrimGrid(index);
 				Vector<real, spatialDim> xi = xs(index);
 				real r = Vector<real, spatialDim>::length(xi);
 				real matterRadius = std::min<real>(r, radius);
-				real volumeOfMatterRadius = 4/3*M_PI*matterRadius*matterRadius*matterRadius;
+				real volumeOfMatterRadius = 4./3.*M_PI*matterRadius*matterRadius*matterRadius;
 				real m = density * volumeOfMatterRadius;	// m^3		
 				
 				/*
@@ -1039,7 +1058,7 @@ int main(int argc, char** argv) {
 			real r = Vector<real, spatialDim>::length(xi);
 			//substitute the schwarzschild R for 2 m(r)
 			real matterRadius = std::min<real>(r, radius);
-			real volumeOfMatterRadius = 4/3*M_PI*matterRadius*matterRadius*matterRadius;
+			real volumeOfMatterRadius = 4./3.*M_PI*matterRadius*matterRadius*matterRadius;
 			real m = density * volumeOfMatterRadius;	// m^3
 
 			//now that I'm using the correct alpha equation, my dm/dr term is causing the analytical gravity calculation to be off ...
@@ -1087,15 +1106,44 @@ int main(int argc, char** argv) {
 			{"gravity", [&](Vector<int,spatialDim> index)->real{ return numericalGravity(index); }},
 			{"analyticalGravity", [&](Vector<int,spatialDim> index)->real{ return analyticalGravity(index); }},
 #endif
-			{"EFE", [&](Vector<int,spatialDim> index)->real{
+			{"EFE_tt(g/cm^3)", [&](Vector<int,spatialDim> index)->real{
+				return EFEConstraintGrid(index)(0,0) / (8 * M_PI) * c * c / G / 1000;	// g/cm^3 ... so in absense of any curvature, the constraint error will now match the density
+			}},
+			{"EFE_ti", [&](Vector<int,spatialDim> index)->real{ 
+				Tensor<real,Symmetric<Lower<dim>,Lower<dim>>> &t = EFEConstraintGrid(index);
+				return sqrt( t(0,1)*t(0,1) + t(0,2)*t(0,2) + t(0,3)*t(0,3) ) * c;
+			}},
+			{"EFE_ij", [&](Vector<int,spatialDim> index) -> real {
+				Tensor<real,Symmetric<Lower<dim>,Lower<dim>>> &t = EFEConstraintGrid(index);
+				/* determinant
+				return t(1,1) * t(2,2) * t(3,3)
+					+ t(1,2) * t(2,3) * t(3,1)
+					+ t(1,3) * t(2,1) * t(3,2)
+					- t(1,3) * t(2,2) * t(3,1)
+					- t(1,1) * t(2,3) * t(3,2)
+					- t(1,2) * t(2,1) * t(3,3);
+				*/
+				// norm
 				real sum = 0;
-				for (int a = 0; a < dim; ++a) {
-					for (int b = 0; b <= a; ++b) {
-						sum += fabs(EFEConstraintGrid(index)(a,b));
+				for (int a = 1; a < dim; ++a) {
+					for (int b = 1; b < dim; ++b) {
+						sum += t(a,b)*t(a,b);
 					}
 				}
-				return sum * c * c;
+				return sqrt(sum);
 			}},
+#if 1
+			{"G_ab", [&](Vector<int,spatialDim> index)->real{
+				Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> G = calc_EinsteinLL(index);
+				real sum = 0;
+				for (int a = 0; a < dim; ++a) {
+					for (int b = 0; b < dim; ++b) {
+						sum += G(a,b) * G(a,b);
+					}
+				}
+				return sqrt(sum);
+			}},
+#endif
 		};
 
 		if (!lua["outputFilename"].isNil()) {

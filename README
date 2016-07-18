@@ -9,7 +9,8 @@ goals:
 1) (CHECK) verify Newtonian gravity matches Schwarzschild gravity from on to above the surface (I'm not doing this here, but I've done this in my solar system project)
 2) (CHECK) verify Schwarzschild stellar model gravity due to analytical connection equations is maximal at surface, ->0 as r->0 and r->infinity
 3) (CHECK) verify Schwarzschild stellar model gravity due to finite difference matches the analytical connection equation values
-3.5) verify EFE constraints are zero with Schwarzschild stellar model -- or at least much smaller than with a flat metric.  This is failing me.  Right now a flat spacetime model produces better EFE constraints than the Scharzschild stellar model does -- despite the flat spacetime having G_ab = 0, and the stress-energy having T_ab = rho
-3.6) get GMRes-ish nonlinear solver to do something.  right now it won't move at all.  I suspect because the residuals are so small to begin with.
-3.7) get JFNK to work.  right now it diverges upon restart, and in flat space thinks it is already at the solution.
-4) Get the numerical solution solver to work, and accurately.  Especially for it to start at flat space, given Earth's stress-energy source term, and come up with Earth's gravity, as the Schwarzschild analytical answer already gives us. 
+4) (CHECK) verify, with flat spacetime and stellar stress-energy, that the EFE constraint error is equal to the stellar body stress-energy within the body, and zero elsewhere.
+5) (CHECK) verify, with Schwarzschild stellar model and stellar stress-energy, that the EFE constraint is near zero everywhere. ... well this works inside the planet and outside the planet, but on the changes in rho this has some numerical errors.
+6) get GMRes-ish nonlinear solver to do something.  right now it won't move at all.
+7) get JFNK to work.  right now it diverges upon restart, and in flat space thinks it is already at the solution.
+8) Get the numerical solution solver to work, and accurately.  Especially for it to start at flat space, given Earth's stress-energy source term, and come up with Earth's gravity, as the Schwarzschild analytical answer already gives us. 

@@ -577,13 +577,13 @@ Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_8piTLL(Vector<int,spatialDi
 	}
 	
 	//total stress-energy	
-	Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> T_LL;
+	Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> _8piT_LL;
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b <= a; ++b) {
-			T_LL(a,b) = (T_EM_LL(a,b) + T_matter_LL(a,b)) * 8 * M_PI;
+			_8piT_LL(a,b) = (T_EM_LL(a,b) + T_matter_LL(a,b)) * 8 * M_PI;
 		}
 	}
-	return T_LL;
+	return _8piT_LL;
 }
 
 //x holds metric primitive (alpha, beta^i, gamma_ij)

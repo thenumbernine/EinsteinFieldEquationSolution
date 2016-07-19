@@ -176,11 +176,13 @@ Vector<real, spatialDim> dx;
 Grid<Vector<real, spatialDim>, spatialDim> xs;
 Grid<StressEnergyPrims, spatialDim> stressEnergyPrimGrid;
 Grid<MetricPrims, spatialDim> metricPrimGrid;
+Grid<MetricPrims, spatialDim> dt_metricPrimGrid;	//d/dt metric prims. for constructing time derivatives, in addition to the grid's spatial derivatives
 Grid<Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> EFEConstraintGrid;	//used by JFNK solver ... and used at the end for verifying constraint accuracy
 
 //some helper storage...
 Grid<Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> gLLs;
 Grid<Tensor<real, Symmetric<Upper<dim>, Upper<dim>>>, spatialDim> gUUs;
+Grid<Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> dt_gLLs;
 Grid<Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> GammaULLs;
 
 template<typename CellType>
@@ -194,13 +196,17 @@ void allocateGrid(Grid<CellType, spatialDim>& grid, std::string name, Vector<int
 void allocateGrids(Vector<int, spatialDim> sizev) {
 	std::cout << std::endl;
 	size_t totalSize = 0;
-	allocateGrid(xs, "xs", sizev, totalSize);
-	allocateGrid(stressEnergyPrimGrid, "stressEnergyPrimGrid", sizev, totalSize);
-	allocateGrid(metricPrimGrid, "metricPrimGrid", sizev, totalSize);
-	allocateGrid(EFEConstraintGrid, "EFEConstraintGrid", sizev, totalSize);
-	allocateGrid(gLLs, "gLLs", sizev, totalSize);
-	allocateGrid(gUUs, "gUUs", sizev, totalSize);
-	allocateGrid(GammaULLs, "GammaULLs", sizev, totalSize);
+#define ALLOCATE_GRID(x)	allocateGrid(x, #x, sizev, totalSize)
+	ALLOCATE_GRID(xs);
+	ALLOCATE_GRID(stressEnergyPrimGrid);
+	ALLOCATE_GRID(metricPrimGrid);
+	ALLOCATE_GRID(dt_metricPrimGrid);
+	ALLOCATE_GRID(EFEConstraintGrid);
+	ALLOCATE_GRID(gLLs);
+	ALLOCATE_GRID(gUUs);
+	ALLOCATE_GRID(dt_gLLs);
+	ALLOCATE_GRID(GammaULLs);
+#undef ALLOCATE_GRID
 }
 
 Vector<int, spatialDim> prev(Vector<int, spatialDim> v, int i) {
@@ -221,11 +227,13 @@ void calc_gLLs_and_gUUs(const real* x) {
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 
 		const MetricPrims &metricPrims = *((const MetricPrims*)x + Vector<int, spatialDim>::dot(metricPrimGrid.step, index));
-
+		real alpha = metricPrims.alpha;
 		const Tensor<real, Upper<spatialDim>> &betaU = metricPrims.betaU;
 		const Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>> &gammaLL = metricPrims.gammaLL;
+	
+		//I can only solve for one of these.  or can I do more?  without solving for d/dt variables, I am solving 10 unknowns for 10 constraints. 
+		const MetricPrims& dt_metricPrims = dt_metricPrimGrid(index);
 
-		real alpha = metricPrims.alpha;
 		real alphaSq = alpha * alpha;
 
 		Tensor<real, Lower<spatialDim>> betaL;
@@ -242,7 +250,8 @@ void calc_gLLs_and_gUUs(const real* x) {
 		}
 
 		//compute ADM metrics
-		
+	
+		//g_ab
 		Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> &gLL = gLLs(index);
 		gLL(0,0) = -alphaSq + betaSq;
 		for (int i = 0; i < spatialDim; ++i) {
@@ -252,6 +261,36 @@ void calc_gLLs_and_gUUs(const real* x) {
 			}
 		}
 
+		//g_ab,t
+		real dt_alpha = dt_metricPrims.alpha;
+		const Tensor<real, Upper<spatialDim>>& dt_betaU = dt_metricPrims.betaU;
+		const Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>>& dt_gammaLL = dt_metricPrims.gammaLL;
+		Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> &dt_gLL = dt_gLLs(index);
+		//g_tt,t = (-alpha^2 + beta^2),t
+		//		 = -2 alpha alpha,t + 2 beta^i_,t beta_i + beta^i beta^j gamma_ij,t
+		dt_gLL(0,0) = -2. * alpha * dt_alpha;
+		for (int i = 0; i < spatialDim; ++i) {
+			dt_gLL(0,0) += 2. * dt_betaU(i) * betaL(i);
+			for (int j = 0; j < spatialDim; ++j) {
+				dt_gLL(0,0) += betaU(i) * betaU(j) * dt_gammaLL(i,j);
+			}
+		}
+		//g_ti = beta_i,t = (beta^j gamma_ij),j 
+		//		 = beta^j_,t gamma_ij + beta^j gamma_ij,t
+		for (int i = 0; i < spatialDim; ++i) {
+			dt_gLL(i+1,0) = 0;
+			for (int j = 0; j < spatialDim; ++j) {
+				dt_gLL(i+1,0) += dt_betaU(j) * gammaLL(i,j) + betaU(j) * dt_gammaLL(i,j);
+			}
+		}
+		//g_ij,t = gamma_ij,t
+		for (int i = 0; i < spatialDim; ++i) {
+			for (int j = 0; j <= i; ++j) {
+				dt_gLL(i+1,j+1) = dt_gammaLL(i,j);
+			}
+		}
+
+		//gamma^ij
 		//why doesn't this call work?
 		//Tensor<real, Symmetric<Upper<spatialDim>, Upper<spatialDim>>> gammaUU = inverse<Tensor<real, Symmetric<Upper<spatialDim>, Upper<spatialDim>>>>(gammaLL);
 		//oh well, here's the body:
@@ -265,6 +304,7 @@ void calc_gLLs_and_gUUs(const real* x) {
 		gammaUU(2,1) = det22(gammaLL(0,1), gammaLL(0,0), gammaLL(2,1), gammaLL(2,0)) / det;
 		gammaUU(2,2) = det22(gammaLL(0,0), gammaLL(0,1), gammaLL(1,0), gammaLL(1,1)) / det;
 
+		//g^ab
 		Tensor<real, Symmetric<Upper<dim>, Upper<dim>>> &gUU = gUUs(index);
 		gUU(0,0) = -1/alphaSq;
 		for (int i = 0; i < spatialDim; ++i) {
@@ -299,10 +339,11 @@ void calc_GammaULLs() {
 				return gLLs(index);
 			}
 		);
+		const Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>& dt_gLL = dt_gLLs(index);
 		Tensor<real, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> dgLLL;
 		for (int a = 0; a < dim; ++a) {
 			for (int b = 0; b < dim; ++b) {	
-				dgLLL(a,b,0) = 0;	//TODO time derivative? for now assume steady state of metric.  this isn't necessary though ... spacetime vortex?
+				dgLLL(a,b,0) = dt_gLL(a,b);
 				for (int i = 0; i < spatialDim; ++i) {
 					dgLLL(a,b,i+1) = dgLLL3(i,a,b);
 				}
@@ -361,7 +402,9 @@ Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_EinsteinLL(Vector<int, spat
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b < dim; ++b) {
 			for (int c = 0; c <= b; ++c) {
-				dGammaULLL(a,b,c,0) = 0;	//TODO explicit calculate Gamma^a_bc,t in terms of alpha, beta^i, gamma_ij
+				//TODO explicit calculate Gamma^a_bc,t in terms of alpha, beta^i, gamma_ij
+				//note that doesn't affect the gravity calculations, only the EFE constraints 
+				dGammaULLL(a,b,c,0) = 0;	
 				for (int i = 0; i < spatialDim; ++i) {
 					dGammaULLL(a,b,c,i+1) = dGammaLULL3(i,a,b,c);
 				}
@@ -962,6 +1005,59 @@ int main(int argc, char** argv) {
 						*/
 					}
 				}
+
+#if 0	//rotating about a distance
+				/*
+				now if we are going to rotate this
+				at a distance of L and at an angular frequency of omega
+				(not considering relativistic Thomas precession just yet)
+				
+				this might be a mess, but I'm (1) calculating the change in time as if I were in a frame rotating by L exp(i omega t)
+				then (2) re-centering the frame at L exp(i omega t) ... so I can use the original coordinate system
+				*/
+				real dr_alpha = r > radius 
+					? (mass / (r * r * sqrt(1. - 2. * mass / r))) 
+					: (mass * r / (radius * radius * radius * sqrt(1. - 2. * mass * r * r / (radius * radius * radius))));
+				real dr_m = r > radius ? 0 : (4. * M_PI * r * r * density);
+				MetricPrims& dt_metricPrims = dt_metricPrimGrid(index);
+				real L = 149.6e+9;	//distance from earth to sun, in m 
+				//real omega = 0; //no rotation
+				//real omega = 2. * M_PI / (60. * 60. * 24. * 365.25) / c;	//one revolution per year in m^-1 
+				//real omega = 1;	//angular velocity of the speed of light
+				real omega = c;	//I'm trying to find a difference ...
+				real t = 0;	//where the position should be.  t=0 means the body is moved by [L, 0], and its derivatives are along [0, L omega] 
+				Vector<real,2> dt_xHat(L * omega * sin(omega * t), -L * omega * cos(omega * t));
+				dt_metricPrims.alpha = dr_alpha * (xi(0)/r * dt_xHat(0) + xi(1)/r * dt_xHat(1));
+				for (int i = 0; i < spatialDim; ++i) {
+					dt_metricPrims.betaU(i) = 0;
+				}
+				for (int i = 0; i < spatialDim; ++i) {
+					for (int j = 0; j < spatialDim; ++j) {
+						real sum = 0;
+						for (int k = 0; k < 2; ++k) {
+							//gamma_ij = f/g
+							//so d/dxHat^k gamma_ij = 
+							real dxHat_k_of_gamma_ij = 
+							// f' / g
+							(
+								((i==k)*xi(j) + xi(i)*(j==k)) * 2.*m + xi(i)*xi(j) * 2.*dr_m * xi(k)/r
+							) / (r * r * (r - 2 * m))
+							// - f g' / g^2
+							- (xi(i) * xi(j) * 2 * m) * ( (xi(k) - 2 * dr_m * xi(k)) * r + 2 * xi(k) * (r - 2 * m) )
+							/ (r * r * r * r * (r - 2 * m) * (r - 2 * m));
+							sum += dxHat_k_of_gamma_ij * dt_xHat(k);
+						}
+						dt_metricPrims.gammaLL(i,j) = sum;
+					}
+				}
+#endif
+
+#if 1	//work that beta
+				//expanding ...
+				MetricPrims& dt_metricPrims = dt_metricPrimGrid(index);
+				dt_metricPrims.betaU(0) = xi(0) / r;
+				dt_metricPrims.betaU(1) = xi(1) / r;
+#endif
 			}},
 		
 			{"stellar_kerr_newman", [&](Vector<int,spatialDim> index){
@@ -979,17 +1075,10 @@ int main(int argc, char** argv) {
 				
 				//real r is the solution of (x*x + y*y) / (r*r + a*a) + z*z / (r*r) = 1 
 				// r^4 - (x^2 + y^2 + z^2 - a^2) r^2 - a^2 z^2 = 0
-				real r;
-				{
-					real b = a*a - x*x - y*y - z*z;
-					real sqrtDiscr = sqrt(b*b - 4.*(-a*a*z*z));
-					//so we have two solutions ... which do we use? 
-					//from gnuplot it looks like the two of these are the same ...
-					real rSqPlus = (-b + sqrtDiscr) / 2.;
-					real rSqMinus = (-b - sqrtDiscr) / 2.;
-					real rSq = rSqPlus;
-					r = sqrt(rSq);
-				}
+				real RSq_minus_aSq = x*x + y*y + z*z - a*a;
+				//so we have two solutions ... which do we use? 
+				//from gnuplot it looks like the two of these are the same ...
+				real r = sqrt((RSq_minus_aSq + sqrt(RSq_minus_aSq * RSq_minus_aSq + 4.*a*a*z*z)) / 2.);	//use the positive root
 
 				//should I use the Kerr-Schild 'r' coordinate?
 				//well, if 'm' is the mass enclosed within the coordinate
@@ -1005,8 +1094,13 @@ int main(int argc, char** argv) {
 			
 				//3.4.33 through 3.4.35 of Alcubierre "Introduction to 3+1 Numerical Relativity"
 				
-				//TODO fix this for the metric within the star
-				metricPrims.alpha = 1./sqrt(1. + 2*H);
+				/*TODO fix this for the metric within the star
+				 in other news, this is an unsolved problem!
+				https://arxiv.org/pdf/1503.02172.pdf section 3.11
+				https://arxiv.org/pdf/1410.2130.pdf section 4.2 last paragraph
+				*/
+				//metricPrims.alpha = 1./sqrt(1. + 2*H);
+				metricPrims.alpha = sqrt(1. - 2*H/(1+2*H) );
 				
 				Vector<real,spatialDim> l( (r*x + a*y)/(r*r + a*a), (r*y - a*x)/(r*r + a*a), z/r );
 				for (int i = 0; i < spatialDim; ++i) {
@@ -1096,9 +1190,9 @@ int main(int argc, char** argv) {
 #endif
 #if 0	//here's taking the acceleration in cartesian and computing the magnitude of the acceleration vector
 			numericalGravity(index) = sqrt(GammaULL(1,0,0) * GammaULL(1,0,0)
-									+ GammaULL(2,0,0) * GammaULL(2,0,0)
-									+ GammaULL(3,0,0) * GammaULL(3,0,0))
-									* c * c;	//times c twice because of the two timelike components of a^i = Gamma^i_tt
+										+ GammaULL(2,0,0) * GammaULL(2,0,0)
+										+ GammaULL(3,0,0) * GammaULL(3,0,0))
+										* c * c;	//times c twice because of the two timelike components of a^i = Gamma^i_tt
 #endif
 		});
 	});

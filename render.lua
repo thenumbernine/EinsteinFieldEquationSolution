@@ -2,7 +2,7 @@
 --[[
 this should be a stand-alone tool
 --]]
-local filename = ... or 'out.txt'
+local filename, col = ... or 'out.txt'
 require 'ext'
 local bit = require 'bit'
 local ffi = require 'ffi'
@@ -33,7 +33,7 @@ local hsvTex
 local volumeShader
 
 -- which column to render?
-local col = ffi.new('int[1]', 4)
+local col = ffi.new('int[1]', col or 4)
 local colmax	-- max # of columns
 local colnames
 

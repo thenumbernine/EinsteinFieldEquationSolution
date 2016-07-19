@@ -1,8 +1,9 @@
+-- how many solver iterations to run.  right now it's diverging, so ... it's off
 maxiter = 0
 
 --initCond = 'flat'
---initCond = 'stellar_schwarzschild'
-initCond = 'stellar_kerr_newman'
+initCond = 'stellar_schwarzschild'
+--initCond = 'stellar_kerr_newman'
 
 --solver = 'conjgrad'
 --solver = 'conjres'

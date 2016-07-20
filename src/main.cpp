@@ -62,6 +62,23 @@ typedef double real;
 enum { spatialDim = 3 };
 enum { dim = spatialDim+1 };
 
+//until I can get the above working ...
+Tensor<real, Symmetric<Upper<spatialDim>, Upper<spatialDim>>> inverse(const Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>>& gammaLL) {
+	//why doesn't this call work?
+	//Tensor<real, Symmetric<Upper<spatialDim>, Upper<spatialDim>>> gammaUU = inverse<Tensor<real, Symmetric<Upper<spatialDim>, Upper<spatialDim>>>>(gammaLL);
+	//oh well, here's the body:
+	//symmetric, so only do Lower triangular
+	Tensor<real, Symmetric<Upper<spatialDim>, Upper<spatialDim>>> gammaUU;
+	real det = determinant33<real, Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>>>(gammaLL);
+	gammaUU(0,0) = det22(gammaLL(1,1), gammaLL(1,2), gammaLL(2,1), gammaLL(2,2)) / det;
+	gammaUU(1,0) = det22(gammaLL(1,2), gammaLL(1,0), gammaLL(2,2), gammaLL(2,0)) / det;
+	gammaUU(1,1) = det22(gammaLL(0,0), gammaLL(0,2), gammaLL(2,0), gammaLL(2,2)) / det;
+	gammaUU(2,0) = det22(gammaLL(1,0), gammaLL(1,1), gammaLL(2,0), gammaLL(2,1)) / det;
+	gammaUU(2,1) = det22(gammaLL(0,1), gammaLL(0,0), gammaLL(2,1), gammaLL(2,0)) / det;
+	gammaUU(2,2) = det22(gammaLL(0,0), gammaLL(0,1), gammaLL(1,0), gammaLL(1,1)) / det;
+	return gammaUU;
+}
+
 Tensor<real, Upper<3>> cross(Tensor<real, Upper<3>> a, Tensor<real, Upper<3>> b) {
 	Tensor<real, Upper<3>> c;
 	c(0) = a(1) * b(2) - a(2) * b(1);
@@ -183,6 +200,8 @@ Grid<Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> EFEConstraintG
 Grid<Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> gLLs;
 Grid<Tensor<real, Symmetric<Upper<dim>, Upper<dim>>>, spatialDim> gUUs;
 Grid<Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> dt_gLLs;
+//Grid<Tensor<real, Symmetric<Upper<dim>, Upper<dim>>>, spatialDim> dt_gUUs;
+//Grid<Tensor<real, Lower<dim>, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> GammaLLLs;
 Grid<Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>>, spatialDim> GammaULLs;
 
 template<typename CellType>
@@ -205,6 +224,8 @@ void allocateGrids(Vector<int, spatialDim> sizev) {
 	ALLOCATE_GRID(gLLs);
 	ALLOCATE_GRID(gUUs);
 	ALLOCATE_GRID(dt_gLLs);
+	//ALLOCATE_GRID(dt_gUUs);
+	//ALLOCATE_GRID(GammaLLLs);
 	ALLOCATE_GRID(GammaULLs);
 #undef ALLOCATE_GRID
 }
@@ -225,9 +246,15 @@ void calc_gLLs_and_gUUs(const real* x) {
 	//calculate gLL and gUU from metric primitives
 	RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
-
-		const MetricPrims &metricPrims = *((const MetricPrims*)x + Vector<int, spatialDim>::dot(metricPrimGrid.step, index));
+		int offset = Vector<int, spatialDim>::dot(metricPrimGrid.step, index);
+assert(offset >= 0 && offset < gridVolume);
+		
+		const MetricPrims &metricPrims = *((const MetricPrims*)x + offset);
 		real alpha = metricPrims.alpha;
+//debugging
+//looks like, for the Krylov solvers, we have a problem of A(x) producing zero and A(A(x)) giving us zeros here ... which cause singular basises
+//lesson: the problem isn't linear.  don't use Krylov solvers.
+assert(alpha != 0);
 		const Tensor<real, Upper<spatialDim>> &betaU = metricPrims.betaU;
 		const Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>> &gammaLL = metricPrims.gammaLL;
 	
@@ -261,10 +288,11 @@ void calc_gLLs_and_gUUs(const real* x) {
 			}
 		}
 
-		//g_ab,t
 		real dt_alpha = dt_metricPrims.alpha;
 		const Tensor<real, Upper<spatialDim>>& dt_betaU = dt_metricPrims.betaU;
 		const Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>>& dt_gammaLL = dt_metricPrims.gammaLL;
+		
+		//g_ab,t
 		Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> &dt_gLL = dt_gLLs(index);
 		//g_tt,t = (-alpha^2 + beta^2),t
 		//		 = -2 alpha alpha,t + 2 beta^i_,t beta_i + beta^i beta^j gamma_ij,t
@@ -289,20 +317,9 @@ void calc_gLLs_and_gUUs(const real* x) {
 				dt_gLL(i+1,j+1) = dt_gammaLL(i,j);
 			}
 		}
-
+	
 		//gamma^ij
-		//why doesn't this call work?
-		//Tensor<real, Symmetric<Upper<spatialDim>, Upper<spatialDim>>> gammaUU = inverse<Tensor<real, Symmetric<Upper<spatialDim>, Upper<spatialDim>>>>(gammaLL);
-		//oh well, here's the body:
-		//symmetric, so only do Lower triangular
-		Tensor<real, Symmetric<Upper<spatialDim>, Upper<spatialDim>>> gammaUU;
-		real det = determinant33<real, Tensor<real, Symmetric<Lower<spatialDim>, Lower<spatialDim>>>>(gammaLL);
-		gammaUU(0,0) = det22(gammaLL(1,1), gammaLL(1,2), gammaLL(2,1), gammaLL(2,2)) / det;
-		gammaUU(1,0) = det22(gammaLL(1,2), gammaLL(1,0), gammaLL(2,2), gammaLL(2,0)) / det;
-		gammaUU(1,1) = det22(gammaLL(0,0), gammaLL(0,2), gammaLL(2,0), gammaLL(2,2)) / det;
-		gammaUU(2,0) = det22(gammaLL(1,0), gammaLL(1,1), gammaLL(2,0), gammaLL(2,1)) / det;
-		gammaUU(2,1) = det22(gammaLL(0,1), gammaLL(0,0), gammaLL(2,1), gammaLL(2,0)) / det;
-		gammaUU(2,2) = det22(gammaLL(0,0), gammaLL(0,1), gammaLL(1,0), gammaLL(1,1)) / det;
+		Tensor<real, Symmetric<Upper<spatialDim>, Upper<spatialDim>>> gammaUU = inverse(gammaLL);
 
 		//g^ab
 		Tensor<real, Symmetric<Upper<dim>, Upper<dim>>> &gUU = gUUs(index);
@@ -313,6 +330,52 @@ void calc_gLLs_and_gUUs(const real* x) {
 				gUU(i+1,j+1) = gammaUU(i,j) - betaU(i) * betaU(j) / alphaSq;
 			}
 		}
+//debugging
+for (int a = 0; a < dim; ++a) {
+	for (int b = 0; b <= a; ++b) {
+		assert(gUU(a,b) == gUU(a,b));
+	}
+}
+
+		//gamma^ij_,t
+		//https://math.stackexchange.com/questions/1187861/derivative-of-transpose-of-inverse-of-matrix-with-respect-to-matrix
+		//d/dt AInv_kl = dAInv_kl / dA_ij d/dt A_ij
+		//= -AInv_ki (d/dt A_ij) AInv_jl
+		Tensor<real, Symmetric<Upper<spatialDim>, Upper<spatialDim>>> dt_gammaUU;
+		Tensor<real, Upper<spatialDim>, Lower<spatialDim>> tmp;
+		for (int k = 0; k < spatialDim; ++k) {
+			for (int j = 0; j < spatialDim; ++j) {
+				real sum = 0;
+				for (int i = 0; i < spatialDim; ++i) {
+					sum -= gammaUU(k,i) * dt_gammaLL(i,j);
+				}
+				tmp(k,j) = sum;
+			}
+		}
+		for (int k = 0; k < spatialDim; ++k) {
+			for (int l = 0; l <= k; ++l) {	//dt_gammaUU is symmetric
+				real sum = 0;
+				for (int j = 0; j < spatialDim; ++j) {
+					sum += tmp(k,j) * gammaUU(j,l);
+				}
+				dt_gammaUU(k,l) = sum;
+			}
+		}
+
+		/*
+		//g^ab_,t
+		Tensor<real, Symmetric<Upper<dim>, Upper<dim>>> &dt_gUU = dt_gUUs(index);
+		//g^tt_,t = (-1/alpha^2),t = 2 alpha,t / alpha^3
+		dt_gUU(0,0) = 2. * dt_alpha / (alpha * alphaSq);
+		//g^ti_,t = (beta^i/alpha^2),t = beta^i_,t / alpha^2 - 2 beta^i alpha,t / alpha^3
+		for (int i = 0; i < spatialDim; ++i) {
+			dt_gUU(i,0) = (dt_betaU(i) * alpha - 2. * betaU(i) * dt_alpha) / (alpha * alphaSq);
+			for (int j = 0; j <= i; ++j) {
+				//g^ij_,t = (gamma^ij - beta^i beta^j / alpha^2),t = gamma^ij_,t - beta^i_,t beta^j / alpha^2 - beta^i beta^j_,t / alpha^2 + 2 beta^i beta^j alpha_,t / alpha^3
+				dt_gUU(i,j) = dt_gammaUU(i,j) - (dt_betaU(i) * betaU(j) + betaU(i) * dt_betaU(j)) / alphaSq + 2. * betaU(i) * betaU(j) * dt_alpha / (alpha * alphaSq);
+			}
+		}
+		*/
 	});
 }
 
@@ -351,17 +414,19 @@ void calc_GammaULLs() {
 		}
 		
 		//connections
+		//Tensor<real, Lower<dim>, Symmetric<Lower<dim>, Lower<dim>>>& GammaLLL = GammaLLLs(index);
 		Tensor<real, Lower<dim>, Symmetric<Lower<dim>, Lower<dim>>> GammaLLL;
 		for (int a = 0; a < dim; ++a) {
 			for (int b = 0; b < dim; ++b) {
 				for (int c = 0; c <= b; ++c) {
 					GammaLLL(a,b,c) = .5 * (dgLLL(a,b,c) + dgLLL(a,c,b) - dgLLL(b,c,a));
+//debugging
+assert(GammaLLL(a,b,c) == GammaLLL(a,b,c));
 				}
 			}
 		}
 		
-		const Tensor<real, Symmetric<Upper<dim>, Upper<dim>>> &gUU = gUUs(index);
-		
+		const Tensor<real, Symmetric<Upper<dim>, Upper<dim>>> &gUU = gUUs(index);		
 		Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>> &GammaULL = GammaULLs(index);
 		for (int a = 0; a < dim; ++a) {
 			for (int b = 0; b < dim; ++b) {
@@ -371,6 +436,8 @@ void calc_GammaULLs() {
 						sum += gUU(a,d) * GammaLLL(d,b,c);
 					}
 					GammaULL(a,b,c) = sum;
+//debugging
+assert(GammaULL(a,b,c) == GammaULL(a,b,c));
 				}
 			}
 		}
@@ -394,26 +461,48 @@ Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_EinsteinLL(Vector<int, spat
 			for (int i = 0; i < spatialDim; ++i) {
 				index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
 			}
+			
+//debugging
+const Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>>& GammaULL = GammaULLs(index);
+for (int i = 0; i < dim; ++i) {
+	for (int j = 0; j < dim; ++j) {
+		for (int k = 0; k <= j; ++k) {
+			assert(GammaULL(i,j,k) == GammaULL(i,j,k));
+		}
+	}
+}
+			
 			return GammaULLs(index);
 		}
 	);			
 	
+	//const Tensor<real, Symmetric<Upper<dim>, Upper<dim>>> &gUU = gUUs(index);
+	//const Tensor<real, Symmetric<Upper<dim>, Upper<dim>>>& dt_gUU = dt_gUUs(index);
+	//const Tensor<real, Lower<dim>, Symmetric<Lower<dim>, Lower<dim>>>& GammaLLL = GammaLLLs(index);
+
 	Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> dGammaULLL;
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b < dim; ++b) {
 			for (int c = 0; c <= b; ++c) {
-				//TODO explicit calculate Gamma^a_bc,t in terms of alpha, beta^i, gamma_ij
-				//note that doesn't affect the gravity calculations, only the EFE constraints 
-				dGammaULLL(a,b,c,0) = 0;	
+				//TODO
+				//Gamma^a_bc,t = (g^ad Gamma_dbc),t = g^ad_,t Gamma_dbc + g^ad Gamma_dbc,t = g^ad_,t Gamma_dbc + 1/2 g^ad Gamma_dbc,t
+				//but this is where the 2nd derivative comes in, and that means providing 2 sets of initial condition metric primitives
+				real sum = 0;
+				//for (int d = 0; d < dim; ++d) {
+				//	sum += dt_gUU(a,d) * GammaLLL(d,b,c) + gUU(a,d) * dt_GammaLLL(d,b,c);
+				//}
+				dGammaULLL(a,b,c,0) = sum;
+				//finite difference
 				for (int i = 0; i < spatialDim; ++i) {
 					dGammaULLL(a,b,c,i+1) = dGammaLULL3(i,a,b,c);
+//debugging				
+assert(dGammaULLL(a,b,c,i+1) == dGammaULLL(a,b,c,i+1));
 				}
 			}
 		}
 	}
 	
 	const Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>> &GammaULL = GammaULLs(index);
-
 	Tensor<real, Upper<dim>, Lower<dim>, Lower<dim>, Lower<dim>> GammaSqULLL;
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b < dim; ++b) {
@@ -424,6 +513,8 @@ Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_EinsteinLL(Vector<int, spat
 						sum += GammaULL(a,e,d) * GammaULL(e,b,c);
 					}
 					GammaSqULLL(a,b,c,d) = sum;
+//debugging
+assert(GammaSqULLL(a,b,c,d) == GammaSqULLL(a,b,c,d));				
 				}
 			}
 		}
@@ -435,6 +526,8 @@ Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_EinsteinLL(Vector<int, spat
 			for (int c = 0; c < dim; ++c) {
 				for (int d = 0; d < dim; ++d) {
 					RiemannULLL(a,b,c,d) = dGammaULLL(a,b,d,c) - dGammaULLL(a,b,c,d) + GammaSqULLL(a,b,d,c) - GammaSqULLL(a,b,c,d);
+//debugging
+assert(RiemannULLL(a,b,c,d) == RiemannULLL(a,b,c,d));
 				}
 			}
 		}
@@ -448,24 +541,28 @@ Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_EinsteinLL(Vector<int, spat
 				sum += RiemannULLL(c,a,c,b);
 			}
 			RicciLL(a,b) = sum;
+//debugggin
+assert(RicciLL(a,b) == RicciLL(a,b));
 		}
 	}
 	
 	const Tensor<real, Symmetric<Upper<dim>, Upper<dim>>> &gUU = gUUs(index);
-	
 	real Gaussian = 0;
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b < dim; ++b) {
 			Gaussian += gUU(a,b) * RicciLL(a,b);
 		}
 	}
-	
-	const Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> &gLL = gLLs(index);
+//debugging
+assert(Gaussian == Gaussian);
 
+	const Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> &gLL = gLLs(index);
 	Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> EinsteinLL;
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b < dim; ++b) {
 			EinsteinLL(a,b) = RicciLL(a,b) - .5 * Gaussian * gLL(a,b);
+//debugging
+assert(EinsteinLL(a,b) == EinsteinLL(a,b));
 		}
 	}
 
@@ -476,10 +573,19 @@ Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_EinsteinLL(Vector<int, spat
 //stores in the grid at y
 void calc_EinsteinLLs(real* y) {
 	RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
+	assert(sizeof(Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>) == sizeof(MetricPrims));	//10 reals for both
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 		int offset = Vector<int, spatialDim>::dot(xs.step, index);
+		assert(offset >= 0 && offset < gridVolume);
 		Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>& EinsteinLL = *((Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>*)y + offset);
 		EinsteinLL = calc_EinsteinLL(index);
+		for (int i = 0; i < dim; ++i) {
+			for (int j = 0; j <= i; ++j) {
+				int ptrOffset = &EinsteinLL(i,j) - y;
+				assert(ptrOffset >= 0 && ptrOffset < gridVolume * sizeof(EinsteinLL) / sizeof(real));
+				assert(y[ptrOffset] == y[ptrOffset]);
+			}
+		}
 	});
 }
 
@@ -634,29 +740,29 @@ Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_8piTLL(Vector<int,spatialDi
 void calc_EFE_constraint(real* y, const real* x) {
 	RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
-
+		
 		//for the JFNK solver that doesn't cache the EinsteinLL tensors
 		// no need to allocate for both an EinsteinLL grid and a EFEConstraintGrid
 		Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> EinsteinLL = calc_EinsteinLL(index);
-
+		
 		//now we want to find the zeroes of EinsteinLL(a,b) - 8 pi T(a,b)
 		// ... which is 10 zeroes ...
 		// ... and we are minimizing the inputs to our metric ...
 		// alpha, beta x3, gamma x6
 		// ... which is 10 variables
 		// tada!
-
+		
 		int offset = Vector<int, spatialDim>::dot(metricPrimGrid.step, index);
 		const MetricPrims &metricPrims = *((const MetricPrims*)x + offset);
 		
 		Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> _8piT_LL = calc_8piTLL(index, metricPrims);
-	
+		
 		/*
 		now solve the linear system G_uv = G(g_uv) = 8 pi T_uv for g_uv 
 		i.e. A(x) = b, assuming A is linear ...
 		but it looks like, because T is based on g, it will really look like G(g_uv) = 8 pi T(g_uv, source terms)
 		*/
-
+		
 		Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> &EFEConstraint = *((Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>*)y + offset);
 		for (int a = 0; a < dim; ++a) {
 			for (int b = 0; b <= a; ++b) {
@@ -673,8 +779,13 @@ struct EFESolver {
 	virtual void solve() = 0;
 };
 
-//use a linear solver and treat G_ab = 8 pi T_ab like a linear system A x = b for x = (alpha, beta, gamma), A x = G_ab(x), and b = 8 pi T_ab ... which is also a function of x ...
-//nothing appears to be moving ...
+/*
+use a linear solver and treat G_ab = 8 pi T_ab like a linear system A x = b for x = (alpha, beta, gamma), A x = G_ab(x), and b = 8 pi T_ab ... which is also a function of x ...
+nothing appears to be moving ...
+or it's diverging ...
+looks like there's an inherent problem in all the Krylov solvers, because they're based on A^n(x), and beacuse A(x) can possibly give a lot of (near-)zeros ...
+... and as long as 'x' is the primitive variables, the second that x=0 for A(x) we end up with a singular basis, and everything fails.
+*/
 struct KrylovSolver : public EFESolver {
 	typedef EFESolver Super;
 	using Super::Super;
@@ -702,6 +813,11 @@ struct KrylovSolver : public EFESolver {
 	}
 
 	void linearFunc(real* y, const real* x) {
+//debugging
+for (int i = 0; i < getN(); ++i) {
+	assert(x[i] == x[i]);
+}
+
 #ifdef PRINTTIME
 		std::cout << "iteration " << jfnk.iter << std::endl;
 		time("calculating g_ab and g^ab", [&](){
@@ -717,6 +833,11 @@ struct KrylovSolver : public EFESolver {
 		time("calculating G_ab", [&]{
 #endif				
 			calc_EinsteinLLs(y);
+//debugging
+for (int i = 0; i < getN(); ++i) {
+	assert(y[i] == y[i]);
+}
+
 #ifdef PRINTTIME
 		});
 		time("calculating T_ab", [&]{
@@ -745,7 +866,7 @@ struct KrylovSolver : public EFESolver {
 			}
 		};*/
 		krylov->stopCallback = [&]()->bool{
-			printf("%s iter %d residual %.49e\n", name(), krylov->iter, krylov->residual);
+			printf("%s iter %d residual %.49e\n", name(), krylov->getIter(), krylov->getResidual());
 			return false;
 		};
 		time("solving", [&](){
@@ -772,14 +893,31 @@ struct ConjGradSolver : public KrylovSolver {
 	}
 };
 
+struct ConjRes : public Solvers::ConjRes<real> {
+	using Solvers::ConjRes<real>::ConjRes;
+	virtual real calcResidual(real rNormL2, real bNormL2, const real* r) {
+//debugging
+for (int i = 0; i < n; ++i) {
+assert(r[i] == r[i]);
+}
+		std::cout << "ConjRes::calcResidual"
+			<< " n=" << n
+			<< " iter=" << iter
+			<< " rNormL2=" << rNormL2
+			<< " bNormL2=" << bNormL2
+			<< std::endl;
+		return rNormL2;
+	}
+};
+
 struct ConjResSolver : public KrylovSolver {
 	typedef KrylovSolver Super;
 	using Super::Super;
 	
 	virtual const char* name() { return "conjres"; }
-	
+
 	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver() {
-		return std::make_shared<Solvers::ConjRes<real>>(
+		return std::make_shared<ConjRes>(
 			getN(),
 			(real*)metricPrimGrid.v,
 			(const real*)_8piTLLs.v,
@@ -790,18 +928,18 @@ struct ConjResSolver : public KrylovSolver {
 	}
 };
 
+struct GMRes : public Solvers::GMRes<real> {
+	using Solvers::GMRes<real>::GMRes;
+	virtual real calcResidual(real rNormL2, real bNormL2, const real* r) {
+		return Solvers::Vector<real>::normL2(n, r);
+	}
+};
+
 struct GMResSolver : public KrylovSolver {
 	typedef KrylovSolver Super;
 	using Super::Super;
 	
 	virtual const char* name() { return "gmres"; }
-
-	struct GMRes : public Solvers::GMRes<real> {
-		using Solvers::GMRes<real>::GMRes;
-		virtual real calcResidual(real rNormL2, real bNormL2, const real* r) {
-			return Solvers::Vector<real>::normL2(n, r);
-		}
-	};
 
 	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver() {
 		return std::make_shared<GMRes>(
@@ -816,15 +954,30 @@ struct GMResSolver : public KrylovSolver {
 	}
 };
 
+struct JFNK : public Solvers::JFNK<real> {
+	using Solvers::JFNK<real>::JFNK;
+	virtual real calcResidual(real rNormL2, real bNormL2, const real* r) {
+		
+		std::cout << "JFNK::calcResidual"
+			<< " n=" << n
+			<< " iter=" << iter
+			<< " rNormL2=" << rNormL2
+			<< " bNormL2=" << bNormL2
+			<< std::endl;
+		
+		return Solvers::Vector<real>::normL2(n, r);
+	}
+};
+
 //use JFNK
 //as soon as this passes 'restart' it explodes.
 struct JFNKSolver : public EFESolver {
 	typedef EFESolver Super;
 	using Super::Super;
-	
+
 	virtual void solve() {
 		assert(sizeof(MetricPrims) == sizeof(EFEConstraintGrid.v[0]));	//this should be 10 real numbers and nothing else
-		Solvers::JFNK<real> jfnk(
+		JFNK jfnk(
 			getN(),	//n = vector size
 			(real*)metricPrimGrid.v,	//x = state vector
 			[&](real* y, const real* x) {	//A = vector function to minimize
@@ -850,22 +1003,28 @@ struct JFNKSolver : public EFESolver {
 			},
 			1e-7, 				//newton stop epsilon
 			maxiter, 			//newton max iter
-			1e-7, 				//gmres stop epsilon
+			[&](size_t n, real* x, real* b, JFNK::Func A) -> std::shared_ptr<Solvers::Krylov<real>> {
+				return std::make_shared<GMRes>(
+					n, x, b, A,
+					1e-7, 				//gmres stop epsilon
 #if 0	// this is ideal, but impractical with 32^3 data
-			getN() * 10, 		//gmres max iter
-			getN()				//gmres restart iter
+					getN() * 10, 		//gmres max iter
+					getN()				//gmres restart iter
 #endif
 #if 1	//so I'm doing this instead:
-			getN(),				//gmres max maxiter
-			10					//gmres restart iter
+					10,				//gmres max maxiter
+					20				//gmres restart iter
 #endif
+				);
+			}
 		);
+		jfnk.maxAlpha = 1e-2;
 		jfnk.stopCallback = [&]()->bool{
-			printf("jfnk iter %d alpha %f residual %.16f\n", jfnk.iter, jfnk.alpha, jfnk.residual);
+			printf("jfnk iter %d alpha %f residual %.16f\n", jfnk.getIter(), jfnk.getAlpha(), jfnk.getResidual());
 			return false;
 		};
-		jfnk.gmres.stopCallback = [&]()->bool{
-			printf("gmres iter %d residual %.16f\n", jfnk.gmres.iter, jfnk.gmres.residual);
+		jfnk.getLinearSolver()->stopCallback = [&]()->bool{
+			printf("gmres iter %d residual %.16f\n", jfnk.getLinearSolver()->getIter(), jfnk.getLinearSolver()->getResidual());
 			return false;
 		};
 		
@@ -1052,11 +1211,29 @@ int main(int argc, char** argv) {
 				}
 #endif
 
-#if 1	//work that beta
+#if 0	//work that beta
+				/*
+				so if we can get the gamma^ij beta_j,t components to equal the Gamma^t_tt components ...
+				 voila, gravity goes away.
+				I'm approximating this as beta^i_,t ... but it really is beta^j_,t gamma_ij + beta^j gamma_ij,t
+				 ... which is the same as what I've got, but I'm setting gamma_ij,t to zero
+				*/
 				//expanding ...
 				MetricPrims& dt_metricPrims = dt_metricPrimGrid(index);
-				dt_metricPrims.betaU(0) = xi(0) / r;
-				dt_metricPrims.betaU(1) = xi(1) / r;
+				Tensor<real, Lower<spatialDim>> betaL;
+				for (int i = 0; i < spatialDim; ++i) {
+					//negate all gravity by throttling the change in space/time coupling of the metric
+					real dm_dr = 0;
+					betaL(i) = -(2*m * (r - 2*m) + 2 * dm_dr * r * (2*m - r)) / (2 * r * r * r) * xi(i)/r;
+				}
+				Tensor<real, Symmetric<Upper<spatialDim>, Upper<spatialDim>>> gammaUU = inverse(metricPrims.gammaLL);
+				for (int i = 0; i < spatialDim; ++i) {
+					real sum = 0;
+					for (int j = 0; j < spatialDim; ++j) {
+						sum += gammaUU(i,j) * betaL(j);
+					}
+					dt_metricPrims.betaU(i) = sum;
+				}
 #endif
 			}},
 		

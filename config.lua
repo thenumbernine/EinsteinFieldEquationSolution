@@ -1,8 +1,8 @@
 -- how many solver iterations to run.  right now it's diverging, so ... it's off
-maxiter = 0
+maxiter = 1
 
---initCond = 'flat'
-initCond = 'stellar_schwarzschild'
+initCond = 'flat'
+--initCond = 'stellar_schwarzschild'
 --initCond = 'stellar_kerr_newman'
 
 --solver = 'conjgrad'
@@ -10,7 +10,7 @@ initCond = 'stellar_schwarzschild'
 --solver = 'gmres'
 solver = 'jfnk'
 
-size = 64
+size = 4
 
 -- how big to construct the grid
 bodyRadii = 2

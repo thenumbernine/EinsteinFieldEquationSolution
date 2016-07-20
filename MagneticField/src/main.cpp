@@ -40,8 +40,8 @@ int main() {
 								+ phi(index - Vector<int,dim>(0,1,0))
 								+ phi(index + Vector<int,dim>(0,0,1))
 								+ phi(index - Vector<int,dim>(0,0,1))
-								- 6 * phi(index))
-								/ (dxSq * 6 * M_PI);
+								- 6. * phi(index))
+								/ (dxSq * 6. * M_PI);
 				}
 			});
 		},		//A

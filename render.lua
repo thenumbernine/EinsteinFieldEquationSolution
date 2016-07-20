@@ -2,7 +2,6 @@
 --[[
 this should be a stand-alone tool
 --]]
-local filename, col = ... or 'out.txt'
 require 'ext'
 local bit = require 'bit'
 local ffi = require 'ffi'
@@ -22,7 +21,9 @@ local Tex2D = require 'gl.tex2d'
 local Tex3D = require 'gl.tex3d'
 local Program = require 'gl.program'
 
-local App = class(ImGuiApp)
+
+local filename, col = ...
+filename = filename or 'out.txt'
 
 local mouse = Mouse()
 local viewAngle = quat()
@@ -33,7 +34,7 @@ local hsvTex
 local volumeShader
 
 -- which column to render?
-local col = ffi.new('int[1]', col or 4)
+local col = ffi.new('int[1]', tonumber(col) or 4)
 local colmax	-- max # of columns
 local colnames
 
@@ -53,6 +54,9 @@ local alpha = ffi.new('float[1]', 1.5e-1)
 local alphaGamma = ffi.new('float[1]', 1)
 local showGradTrace = ffi.new('bool[1]', false)
 local showCurlTrace = ffi.new('bool[1]', false)
+
+
+local App = class(ImGuiApp)
 
 function App:initGL()
 	App.super.initGL(self)

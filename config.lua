@@ -1,5 +1,5 @@
 -- how many solver iterations to run.  right now it's diverging, so ... it's off
-maxiter = 1
+maxiter = 100
 
 initCond = 'flat'
 --initCond = 'stellar_schwarzschild'

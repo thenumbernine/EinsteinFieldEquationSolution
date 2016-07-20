@@ -840,13 +840,20 @@ for (int i = 0; i < getN(); ++i) {
 
 #ifdef PRINTTIME
 		});
+#endif				
+
+		//here's me abusing GMRes.
+		//I'm updating the 'b' vector mid-algorithm since it is dependent on the 'x' vector
+		//maybe I shouldn't be doing so here, but instead only before every linear solver solve()?
+		//that way the 'b' vector is constant during the linear solver solve() ...
+#if 0
+#ifdef PRINTTIME
 		time("calculating T_ab", [&]{
 #endif				
-			//here's me abusing GMRes.
-			//I'm updating the 'b' vector mid-algorithm since it is dependent on the 'x' vector
 			calc_8piTLLs(x);
 #ifdef PRINTTIME
 		});
+#endif
 #endif
 	}
 
@@ -906,6 +913,7 @@ assert(r[i] == r[i]);
 			<< " rNormL2=" << rNormL2
 			<< " bNormL2=" << bNormL2
 			<< std::endl;
+		
 		return rNormL2;
 	}
 };
@@ -931,7 +939,29 @@ struct ConjResSolver : public KrylovSolver {
 struct GMRes : public Solvers::GMRes<real> {
 	using Solvers::GMRes<real>::GMRes;
 	virtual real calcResidual(real rNormL2, real bNormL2, const real* r) {
-		return Solvers::Vector<real>::normL2(n, r);
+#if 0
+		//error is 16, is sqrt(total sum of errors) which is 256, which is 4 * 64
+		// 64 is the # of grid elements, 4 is how much error per grid
+		// because the inputs have 4 1's and the rest is 0's.
+		real real_rNormL2 = Solvers::Vector<real>::normL2(n, r);
+		std::cout << "GMRes::calcResidual"
+			<< " iter=" << iter
+			<< " rNormL2=" << rNormL2
+			<< " bNormL2=" << bNormL2
+			<< " real_rNormL2=" << real_rNormL2 
+			<< std::endl;
+		int e = 0;
+		RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
+		std::for_each(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
+			std::cout << "r[" << index << "] =";
+			for (int j = 0; j < 10; ++j, ++e) {
+				std::cout << " " << r[e];
+			}
+			std::cout << std::endl;
+		});
+		return real_rNormL2;
+#endif
+		return rNormL2;
 	}
 };
 
@@ -956,16 +986,23 @@ struct GMResSolver : public KrylovSolver {
 
 struct JFNK : public Solvers::JFNK<real> {
 	using Solvers::JFNK<real>::JFNK;
-	virtual real calcResidual(real rNormL2, real bNormL2, const real* r) {
-		
+	virtual real calcResidual(const real* r, real alpha) const {
+
+		//residual is only used to compare whether somethig is better or worse than somethign else, so scale it up
+		real sum = 0;
+		for (int i = 0; i < n; ++i) {
+			sum += r[i] * r[i];
+		}
+		real residual = sqrt(sum) / (8. * M_PI) * c * c / G / 1000.;
+
 		std::cout << "JFNK::calcResidual"
 			<< " n=" << n
 			<< " iter=" << iter
-			<< " rNormL2=" << rNormL2
-			<< " bNormL2=" << bNormL2
+			<< " alpha=" << alpha
+			<< " residual=" << residual 
 			<< std::endl;
 		
-		return Solvers::Vector<real>::normL2(n, r);
+		return residual;
 	}
 };
 
@@ -995,39 +1032,86 @@ struct JFNKSolver : public EFESolver {
 #ifdef PRINTTIME
 				});
 				time("calculating G_ab = 8 pi T_ab", [&]{
-#endif				
+#endif
 				calc_EFE_constraint(y, x);	//EFEConstraintGrid, metricPrimGrid
 #ifdef PRINTTIME
 				});
 #endif
+
+
+/*debug output* /
+std::cout << "efe constraint" << std::endl;
+for (int i = 0; i < gridVolume*10; ++i) {
+	std::cout << " " << y[i];
+}
+std::cout << std::endl;
+//this is happening after the first gmres iteration, but I don't think it should ...
+std::cout << "got jfnk residual == 0" << std::endl;
+int e = 0;
+RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
+std::for_each(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
+	std::cout << "index=" << index;
+	std::cout << " metricPrims=";
+	for (int j = 0; j < 10; ++j, ++e) {
+		std::cout << " " << x[e];
+	}
+	
+	std::cout << " G_ab=";
+	Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> EinsteinLL = calc_EinsteinLL(index);
+	real* p = &EinsteinLL(0,0);
+	for (int j = 0; j < 10; ++j, ++p) {
+		std::cout << " " << *p;
+	}
+
+	std::cout << " 8piT_ab=";
+	int offset = Vector<int, spatialDim>::dot(metricPrimGrid.step, index);
+	const MetricPrims &metricPrims = *((const MetricPrims*)x + offset);
+	Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> _8piT_LL = calc_8piTLL(index, metricPrims);
+	p = &_8piT_LL(0,0);
+	for (int j = 0; j < 10; ++j, ++p) {
+		std::cout << " " << *p;
+	}
+	
+	std::cout << std::endl;
+});
+/**/
 			},
-			1e-7, 				//newton stop epsilon
+			1e-100, 				//newton stop epsilon
 			maxiter, 			//newton max iter
 			[&](size_t n, real* x, real* b, JFNK::Func A) -> std::shared_ptr<Solvers::Krylov<real>> {
 				return std::make_shared<GMRes>(
 					n, x, b, A,
-					1e-7, 				//gmres stop epsilon
+					1e-20, 				//gmres stop epsilon
 #if 0	// this is ideal, but impractical with 32^3 data
 					getN() * 10, 		//gmres max iter
 					getN()				//gmres restart iter
 #endif
 #if 1	//so I'm doing this instead:
-					10,				//gmres max maxiter
-					20				//gmres restart iter
+					4 * getN(),				//gmres max maxiter
+					4 * getN()				//gmres restart iter
 #endif
 				);
 			}
 		);
-		jfnk.maxAlpha = 1e-2;
+		jfnk.jacobianEpsilon = 1e-6;
+		jfnk.maxAlpha = 1;
+		jfnk.lineSearch = &JFNK::lineSearch_linear;
+		//jfnk.lineSearch = &JFNK::lineSearch_none;
 		jfnk.stopCallback = [&]()->bool{
-			printf("jfnk iter %d alpha %f residual %.16f\n", jfnk.getIter(), jfnk.getAlpha(), jfnk.getResidual());
+			std::cout << "jfnk iter=" << jfnk.getIter() << " alpha=" << jfnk.getAlpha() << " residual=" << jfnk.getResidual() << std::endl;
 			return false;
 		};
 		jfnk.getLinearSolver()->stopCallback = [&]()->bool{
-			printf("gmres iter %d residual %.16f\n", jfnk.getLinearSolver()->getIter(), jfnk.getLinearSolver()->getResidual());
+			//the residual is staying constant ... at 16 even, for a 4*4*4 grid ...
+			std::cout << "gmres iter=" << jfnk.getLinearSolver()->getIter() << " residual=" << jfnk.getLinearSolver()->getResidual() << std::endl;
 			return false;
 		};
-		
+		jfnk.getLinearSolver()->MInv = [&](real* y, const real* x) {
+			for (int i = 0; i < getN(); ++i) {
+				y[i] = x[i] / (8. * M_PI) * c * c / G / 1000.;
+			}
+		};
+
 		time("solving", [&](){
 			jfnk.solve();
 		});
@@ -1431,7 +1515,7 @@ int main(int argc, char** argv) {
 			{"analyticalGravity", [&](Vector<int,spatialDim> index)->real{ return analyticalGravity(index); }},
 #endif
 			{"EFE_tt(g/cm^3)", [&](Vector<int,spatialDim> index)->real{
-				return EFEConstraintGrid(index)(0,0) / (8 * M_PI) * c * c / G / 1000;	// g/cm^3 ... so in absense of any curvature, the constraint error will now match the density
+				return EFEConstraintGrid(index)(0,0) / (8. * M_PI) * c * c / G / 1000.;	// g/cm^3 ... so in absense of any curvature, the constraint error will now match the density
 			}},
 			{"EFE_ti", [&](Vector<int,spatialDim> index)->real{ 
 				Tensor<real,Symmetric<Lower<dim>,Lower<dim>>> &t = EFEConstraintGrid(index);

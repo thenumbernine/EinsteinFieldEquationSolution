@@ -240,16 +240,20 @@ Vector<int, spatialDim> next(Vector<int, spatialDim> v, int i) {
 	return v;
 }
 
-//calcs gUUs and gLLs
-//based on x which holds metric prims 
-void calc_gLLs_and_gUUs(const real* x) {
+/*
+calculates contents of gUUs, gLLs
+	(incl. first deriv: dt_gLLs)
+	(incl. second deriv: dt_gUUs)
+x is an array of MetricPrims[gridVolume]
+*/
+void calc_gLLs_and_gUUs(const MetricPrims* metricPrimVec) {
 	//calculate gLL and gUU from metric primitives
 	RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
 		int offset = Vector<int, spatialDim>::dot(metricPrimGrid.step, index);
 assert(offset >= 0 && offset < gridVolume);
 		
-		const MetricPrims &metricPrims = *((const MetricPrims*)x + offset);
+		const MetricPrims &metricPrims = *(metricPrimVec + offset);
 		real alpha = metricPrims.alpha;
 //debugging
 //looks like, for the Krylov solvers, we have a problem of A(x) producing zero and A(A(x)) giving us zeros here ... which cause singular basises
@@ -379,8 +383,13 @@ for (int a = 0; a < dim; ++a) {
 	});
 }
 
-//depends on the gLLs and gUUs which are calculated in calc_gLLs_and_gUUs(x)
-//calculates GammaULLs
+/*
+calculates contents of GammaULLs
+	incl second derivs: GammaLLLs
+depends on gLLs, gUUs
+	incl first derivs: dt_gLLs
+prereq: calc_gLLs_and_gUUs(x)
+*/
 void calc_GammaULLs() {
 	RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
@@ -444,8 +453,12 @@ assert(GammaULL(a,b,c) == GammaULL(a,b,c));
 	});
 }
 
-//accepts index
-//based on gLLs, gUUs, and GammaULLs
+/*
+index is the location in the grid
+depends on GammaULLs, gLLs, gUUs
+	second deriv: dt_gUUs, GammaLLLs
+prereq: calc_gLLs_and_gUUs(), calc_GammaULLs()
+*/
 Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_EinsteinLL(Vector<int, spatialDim> index) {
 	//connection derivative
 	Tensor<real, Lower<spatialDim>, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>> dGammaLULL3 = partialDerivative<
@@ -569,8 +582,10 @@ assert(EinsteinLL(a,b) == EinsteinLL(a,b));
 	return EinsteinLL;
 }
 
-//calls calc_EinsteinLL at each point
-//stores in the grid at y
+/*
+calls calc_EinsteinLL at each point
+stores G_ab in y
+*/
 void calc_EinsteinLLs(real* y) {
 	RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 	assert(sizeof(Tensor<real, Symmetric<Lower<dim>, Lower<dim>>>) == sizeof(MetricPrims));	//10 reals for both
@@ -589,7 +604,12 @@ void calc_EinsteinLLs(real* y) {
 	});
 }
 
-//based on 
+/*
+index is the location in the grid
+metricPrims are the metric primitives at that point
+returns 8*pi*T_ab for T_ab the stress energy at that point
+depends on: stressEnergyPrims, gLLs, calc_gLLs_and_gUUs()
+*/
 Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_8piTLL(Vector<int,spatialDim> index, const MetricPrims& metricPrims) {
 	real alpha = metricPrims.alpha;
 	real alphaSq = alpha * alpha;
@@ -729,14 +749,17 @@ Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> calc_8piTLL(Vector<int,spatialDi
 	Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> _8piT_LL;
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b <= a; ++b) {
-			_8piT_LL(a,b) = (T_EM_LL(a,b) + T_matter_LL(a,b)) * 8 * M_PI;
+			_8piT_LL(a,b) = (T_EM_LL(a,b) + T_matter_LL(a,b)) * 8. * M_PI;
 		}
 	}
 	return _8piT_LL;
 }
 
-//x holds metric primitive (alpha, beta^i, gamma_ij)
-//y returns G_ab - 8 pi T_ab
+/*
+x holds a grid of MetricPrims
+stores at y a grid of the values (G_ab - 8 pi T_ab)
+depends on: calc_gLLs_and_gUUs(), calc_GammaULLs()
+*/
 void calc_EFE_constraint(real* y, const real* x) {
 	RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
@@ -783,8 +806,9 @@ struct EFESolver {
 use a linear solver and treat G_ab = 8 pi T_ab like a linear system A x = b for x = (alpha, beta, gamma), A x = G_ab(x), and b = 8 pi T_ab ... which is also a function of x ...
 nothing appears to be moving ...
 or it's diverging ...
-looks like there's an inherent problem in all the Krylov solvers, because they're based on A^n(x), and beacuse A(x) can possibly give a lot of (near-)zeros ...
+looks like there's an inherent problem in all the Krylov solvers, because they're based on A^n(x), and beacuse initial-condition flat A(x) gives all zeroes for G_ab(x)
 ... and as long as 'x' is the primitive variables, the second that x=0 for A(x) we end up with a singular basis, and everything fails.
+... so, for constant A(x) = G_ab(x), G_ab(G_ab(x)) is all nans 
 */
 struct KrylovSolver : public EFESolver {
 	typedef EFESolver Super;
@@ -800,9 +824,12 @@ struct KrylovSolver : public EFESolver {
 
 	virtual const char* name() = 0;
 
-	//calls calc_8piTLL
-	//based on x which holds the metricPrims
-	//stores in _8piTLLs
+	/*
+	x holds a grid of MetricPrims 
+	calls calc_8piTLL() at each point on the grid
+	stores results in _8piTLLs
+	depends on: calc_gLLs_and_gUUs()
+	*/
 	void calc_8piTLLs(const real* x) {
 		RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
@@ -822,7 +849,7 @@ for (int i = 0; i < getN(); ++i) {
 		std::cout << "iteration " << jfnk.iter << std::endl;
 		time("calculating g_ab and g^ab", [&](){
 #endif				
-			calc_gLLs_and_gUUs(x);
+			calc_gLLs_and_gUUs((const MetricPrims*)x);
 #ifdef PRINTTIME
 		});
 		time("calculating Gamma^a_bc", [&](){
@@ -1023,7 +1050,7 @@ struct JFNKSolver : public EFESolver {
 				std::cout << "iteration " << jfnk.iter << std::endl;
 				time("calculating g_ab and g^ab", [&](){
 #endif				
-				calc_gLLs_and_gUUs(x);
+				calc_gLLs_and_gUUs((const MetricPrims*)x);
 #ifdef PRINTTIME
 				});
 				time("calculating Gamma^a_bc", [&](){
@@ -1419,7 +1446,7 @@ int main(int argc, char** argv) {
 	//once all is solved for, do some final calculations ...
 
 	time("calculating g_ab and g^ab", [&]{
-		calc_gLLs_and_gUUs((real*)metricPrimGrid.v);
+		calc_gLLs_and_gUUs(metricPrimGrid.v);
 	});
 
 	time("calculating Gamma^a_bc", [&]{
@@ -1586,6 +1613,15 @@ int main(int argc, char** argv) {
 			fclose(file);
 		}
 	}
-	
+
+/*
+	{
+		calc_EinsteinLLs(
+		RangeObj<spatialDim> range(Vector<int,spatialDim>(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, spatialDim>& index) {
+			calc_EinsteinLL
+		});
+	}
+*/
 	std::cout << "done!" << std::endl;
 }

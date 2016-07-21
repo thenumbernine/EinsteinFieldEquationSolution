@@ -231,9 +231,6 @@ Vector<int, subDim> sizev;
 int gridVolume;
 Vector<real, subDim> dx;
 
-//grids
-Grid<TensorSL, subDim> EFEConstraintGrid;	//used by JFNK solver ... and used at the end for verifying constraint accuracy
-
 //some helper storage...
 Grid<TensorSL, subDim> gLLs;
 Grid<TensorSU, subDim> gUUs;
@@ -787,13 +784,13 @@ void calc_EFE_constraint(
 	const Grid<MetricPrims, subDim>& metricPrimGrid,
 	const Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
 	//output
-	Grid<TensorSL, subDim>& EFEConstraintGrid
+	Grid<TensorSL, subDim>& EFEGrid
 ) {
 	RangeObj<subDim> range(Vector<int,subDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
 		
 		//for the JFNK solver that doesn't cache the EinsteinLL tensors
-		// no need to allocate for both an EinsteinLL grid and a EFEConstraintGrid
+		// no need to allocate for both an EinsteinLL grid and a EFEGrid
 		TensorSL EinsteinLL = calc_EinsteinLL(index, gLLs, gUUs, GammaULLs);
 		
 		//now we want to find the zeroes of EinsteinLL(a,b) - 8 pi T(a,b)
@@ -810,10 +807,10 @@ void calc_EFE_constraint(
 		but it looks like, because T is based on g, it will really look like G(g_uv) = 8 pi T(g_uv, source terms)
 		*/
 		
-		TensorSL &EFEConstraint = EFEConstraintGrid(index);
+		TensorSL &EFE = EFEGrid(index);
 		for (int a = 0; a < dim; ++a) {
 			for (int b = 0; b <= a; ++b) {
-				EFEConstraint(a,b) = EinsteinLL(a,b) - _8piT_LL(a,b);
+				EFE(a,b) = EinsteinLL(a,b) - _8piT_LL(a,b);
 			}
 		}
 	});
@@ -1107,7 +1104,13 @@ struct JFNK : public Solvers::JFNK<real> {
 //as soon as this passes 'restart' it explodes.
 struct JFNKSolver : public EFESolver {
 	typedef EFESolver Super;
-	using Super::Super;
+
+	Grid<TensorSL, subDim> EFEGrid;	
+
+	JFNKSolver(int maxiter)
+	: Super(maxiter)
+	, EFEGrid(sizev)
+	{}
 
 	virtual void solve(
 		//input/output
@@ -1116,7 +1119,7 @@ struct JFNKSolver : public EFESolver {
 		const Grid<MetricPrims, subDim>& dt_metricPrimGrid,	//first deriv
 		const Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid
 	) {
-		assert(sizeof(MetricPrims) == sizeof(EFEConstraintGrid.v[0]));	//this should be 10 real numbers and nothing else
+		assert(sizeof(MetricPrims) == sizeof(EFEGrid.v[0]));	//this should be 10 real numbers and nothing else
 		JFNK jfnk(
 			getN(),	//n = vector size
 			(real*)metricPrimGrid.v,	//x = state vector
@@ -1275,10 +1278,9 @@ int main(int argc, char** argv) {
 		size_t totalSize = 0;
 #define ALLOCATE_GRID(x)	allocateGrid(x, #x, sizev, totalSize)
 		ALLOCATE_GRID(xs);
-		ALLOCATE_GRID(stressEnergyPrimGrid);
 		ALLOCATE_GRID(metricPrimGrid);
 		ALLOCATE_GRID(dt_metricPrimGrid);	//first deriv
-		ALLOCATE_GRID(EFEConstraintGrid);
+		ALLOCATE_GRID(stressEnergyPrimGrid);
 		ALLOCATE_GRID(gLLs);
 		ALLOCATE_GRID(gUUs);
 		ALLOCATE_GRID(dt_gLLs);
@@ -1567,8 +1569,9 @@ int main(int argc, char** argv) {
 		calc_GammaULLs(gLLs, gUUs, dt_gLLs, GammaULLs);
 	});
 
+	Grid<TensorSL, subDim> EFEGrid(sizev);
 	time("calculating EFE constraint", [&]{
-		calc_EFE_constraint(metricPrimGrid, stressEnergyPrimGrid, EFEConstraintGrid);
+		calc_EFE_constraint(metricPrimGrid, stressEnergyPrimGrid, EFEGrid);
 	});
 
 	Grid<real, subDim> numericalGravity(sizev);
@@ -1656,14 +1659,14 @@ int main(int argc, char** argv) {
 			{"analyticalGravity", [&](Vector<int,subDim> index)->real{ return analyticalGravity(index); }},
 #endif
 			{"EFE_tt(g/cm^3)", [&](Vector<int,subDim> index)->real{
-				return EFEConstraintGrid(index)(0,0) / (8. * M_PI) * c * c / G / 1000.;	// g/cm^3 ... so in absense of any curvature, the constraint error will now match the density
+				return EFEGrid(index)(0,0) / (8. * M_PI) * c * c / G / 1000.;	// g/cm^3 ... so in absense of any curvature, the constraint error will now match the density
 			}},
 			{"EFE_ti", [&](Vector<int,subDim> index)->real{ 
-				TensorSL &t = EFEConstraintGrid(index);
+				TensorSL &t = EFEGrid(index);
 				return sqrt( t(0,1)*t(0,1) + t(0,2)*t(0,2) + t(0,3)*t(0,3) ) * c;
 			}},
 			{"EFE_ij", [&](Vector<int,subDim> index) -> real {
-				TensorSL &t = EFEConstraintGrid(index);
+				TensorSL &t = EFEGrid(index);
 				/* determinant
 				return t(1,1) * t(2,2) * t(3,3)
 					+ t(1,2) * t(2,3) * t(3,1)
@@ -1728,14 +1731,35 @@ int main(int argc, char** argv) {
 		}
 	}
 
-/*
 	{
-		calc_EinsteinLLs(
 		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
-		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
-			calc_EinsteinLL
+		
+		real EFE_tt_min = std::numeric_limits<real>::infinity();
+		real EFE_tt_max = -std::numeric_limits<real>::infinity();
+		std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
+			real EFE_tt = EFEGrid(index)(0,0);
+			if (EFE_tt < EFE_tt_min) EFE_tt_min = EFE_tt;
+			if (EFE_tt > EFE_tt_max) EFE_tt_max = EFE_tt;
 		});
+		std::cout << "EFE_tt range: " << EFE_tt_min << " to " << EFE_tt_max << std::endl;
+
+		int bins = 256;
+		std::vector<real> EFE_tt_distr(bins);
+		std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
+			real EFE_tt = EFEGrid(index)(0,0);
+			int bin = (int)((EFE_tt - EFE_tt_min) / (EFE_tt_max - EFE_tt_min) * (real)bins);
+			if (bin == bins) --bin;
+			++EFE_tt_distr[bin];
+		});
+
+		std::cout << "EFE_tt:" << std::endl;
+		for (int i = 0; i < bins; ++i) {
+			real delta = EFE_tt_max - EFE_tt_min;
+			std::cout << (delta * (real)i / (real)bins + EFE_tt_min) << "\t" 
+					<< (delta * (real)(i+1) / (real)bins + EFE_tt_min) << "\t"
+					<< EFE_tt_distr[i] << std::endl;
+		}
 	}
-*/
+
 	std::cout << "done!" << std::endl;
 }

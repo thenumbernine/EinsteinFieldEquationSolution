@@ -232,7 +232,6 @@ int gridVolume;
 Vector<real, subDim> dx;
 
 //grids
-Grid<MetricPrims, subDim> dt_metricPrimGrid;	//d/dt metric prims. for constructing time derivatives, in addition to the grid's spatial derivatives
 Grid<TensorSL, subDim> EFEConstraintGrid;	//used by JFNK solver ... and used at the end for verifying constraint accuracy
 
 //some helper storage...
@@ -260,6 +259,7 @@ x is an array of MetricPrims[gridVolume]
 void calc_gLLs_and_gUUs(
 	//input
 	const Grid<MetricPrims, subDim>& metricPrimGrid,
+	const Grid<MetricPrims, subDim>& dt_metricPrimGrid,	//first deriv
 	//output:
 	Grid<TensorSL, subDim>& gLLs,
 	Grid<TensorSU, subDim>& gUUs,
@@ -827,6 +827,7 @@ struct EFESolver {
 		//input/output
 		Grid<MetricPrims, subDim>& metricPrimGrid,
 		//input
+		const Grid<MetricPrims, subDim>& dt_metricPrimGrid,	//first deriv
 		const Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid
 	) = 0;
 };
@@ -872,7 +873,12 @@ struct KrylovSolver : public EFESolver {
 		});
 	}
 
-	void linearFunc(real* y, const real* x) {
+	void linearFunc(
+		real* y,
+		const real* x,
+		//extra inputs
+		const Grid<MetricPrims, subDim>& dt_metricPrimGrid	//first deriv
+	) {
 //debugging
 for (int i = 0; i < getN(); ++i) {
 	assert(x[i] == x[i]);
@@ -885,6 +891,7 @@ for (int i = 0; i < getN(); ++i) {
 			calc_gLLs_and_gUUs(
 				//input
 				gridFromPtr<MetricPrims>(x, sizev).grid,
+				dt_metricPrimGrid,	//first deriv
 				//output
 				gLLs, gUUs, dt_gLLs);
 #ifdef PRINTTIME
@@ -926,19 +933,26 @@ for (int i = 0; i < getN(); ++i) {
 #endif
 	}
 
-	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver(Grid<MetricPrims, subDim>& metricPrimGrid) = 0;
+	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver(
+		Grid<MetricPrims, subDim>& metricPrimGrid,
+		const Grid<MetricPrims, subDim>& dt_metricPrimGrid	//first deriv
+	) = 0;
 	
 	virtual void solve(
 		//input/output
 		Grid<MetricPrims, subDim>& metricPrimGrid,
 		//input
+		const Grid<MetricPrims, subDim>& dt_metricPrimGrid,	//first deriv
 		const Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid
 	) {
 		time("calculating T_ab", [&]{
 			calc_8piTLLs(metricPrimGrid, stressEnergyPrimGrid, _8piTLLs);
 		});
 		
-		krylov = makeSolver(metricPrimGrid);
+		krylov = makeSolver(
+			metricPrimGrid, 
+			dt_metricPrimGrid	//first deriv
+		);
 		
 		//seems this is stopping too early, so try scaling both x and y ... or at least the normal that is used ...
 		/*krylov->MInv = [&](real* y, const real* x) {
@@ -962,12 +976,15 @@ struct ConjGradSolver : public KrylovSolver {
 	
 	virtual const char* name() { return "conjgrad"; }	
 	
-	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver(Grid<MetricPrims, subDim>& metricPrimGrid) {
+	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver(
+		Grid<MetricPrims, subDim>& metricPrimGrid,
+		const Grid<MetricPrims, subDim>& dt_metricPrimGrid	//first deriv
+	) {
 		return std::make_shared<Solvers::ConjGrad<real>>(
 			getN(),
 			(real*)metricPrimGrid.v,
 			(const real*)_8piTLLs.v,
-			[&](real* y, const real* x) { linearFunc(y, x); },
+			[&](real* y, const real* x) { linearFunc(y, x, dt_metricPrimGrid); },
 			1e-30,	//epsilon
 			getN()	//maxiter
 		);
@@ -998,12 +1015,15 @@ struct ConjResSolver : public KrylovSolver {
 	
 	virtual const char* name() { return "conjres"; }
 
-	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver(Grid<MetricPrims, subDim>& metricPrimGrid) {
+	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver(
+		Grid<MetricPrims, subDim>& metricPrimGrid,
+		const Grid<MetricPrims, subDim>& dt_metricPrimGrid	//first deriv
+	) {
 		return std::make_shared<ConjRes>(
 			getN(),
 			(real*)metricPrimGrid.v,
 			(const real*)_8piTLLs.v,
-			[&](real* y, const real* x) { linearFunc(y, x); },
+			[&](real* y, const real* x) { linearFunc(y, x, dt_metricPrimGrid); },
 			1e-30,	//epsilon
 			getN()	//maxiter
 		);
@@ -1045,12 +1065,15 @@ struct GMResSolver : public KrylovSolver {
 	
 	virtual const char* name() { return "gmres"; }
 
-	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver(Grid<MetricPrims, subDim>& metricPrimGrid) {
+	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver(
+		Grid<MetricPrims, subDim>& metricPrimGrid,
+		const Grid<MetricPrims, subDim>& dt_metricPrimGrid	//first deriv
+	) {
 		return std::make_shared<GMRes>(
 			getN(),	//n = vector size
 			(real*)metricPrimGrid.v,		//x = state vector
 			(const real*)_8piTLLs.v,		//b = solution vector
-			[&](real* y, const real* x) { linearFunc(y, x); },	//A = linear function to solve x for A(x) = b
+			[&](real* y, const real* x) { linearFunc(y, x, dt_metricPrimGrid); },	//A = linear function to solve x for A(x) = b
 			1e-30,			//epsilon
 			getN(),			//maxiter
 			100				//restart
@@ -1090,6 +1113,7 @@ struct JFNKSolver : public EFESolver {
 		//input/output
 		Grid<MetricPrims, subDim>& metricPrimGrid,
 		//input
+		const Grid<MetricPrims, subDim>& dt_metricPrimGrid,	//first deriv
 		const Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid
 	) {
 		assert(sizeof(MetricPrims) == sizeof(EFEConstraintGrid.v[0]));	//this should be 10 real numbers and nothing else
@@ -1105,6 +1129,7 @@ struct JFNKSolver : public EFESolver {
 				calc_gLLs_and_gUUs(
 					//input:
 					gridFromPtr<MetricPrims>(x, sizev).grid,
+					dt_metricPrimGrid,	//first deriv
 					//output:
 					gLLs, gUUs, dt_gLLs);
 #ifdef PRINTTIME
@@ -1242,6 +1267,7 @@ int main(int argc, char** argv) {
 
 	Grid<Vector<real, subDim>, subDim> xs;
 	Grid<MetricPrims, subDim> metricPrimGrid;
+	Grid<MetricPrims, subDim> dt_metricPrimGrid;	//first deriv
 	Grid<StressEnergyPrims, subDim> stressEnergyPrimGrid;
 
 	time("allocating", [&]{ 
@@ -1251,7 +1277,7 @@ int main(int argc, char** argv) {
 		ALLOCATE_GRID(xs);
 		ALLOCATE_GRID(stressEnergyPrimGrid);
 		ALLOCATE_GRID(metricPrimGrid);
-		ALLOCATE_GRID(dt_metricPrimGrid);
+		ALLOCATE_GRID(dt_metricPrimGrid);	//first deriv
 		ALLOCATE_GRID(EFEConstraintGrid);
 		ALLOCATE_GRID(gLLs);
 		ALLOCATE_GRID(gUUs);
@@ -1520,7 +1546,10 @@ int main(int argc, char** argv) {
 	}
 
 	if (maxiter > 0) {
-		solver->solve(metricPrimGrid, stressEnergyPrimGrid);
+		solver->solve(
+			metricPrimGrid, 
+			dt_metricPrimGrid, 	//first deriv
+			stressEnergyPrimGrid);
 	}
 
 	//once all is solved for, do some final calculations ...
@@ -1528,7 +1557,8 @@ int main(int argc, char** argv) {
 	time("calculating g_ab and g^ab", [&]{
 		calc_gLLs_and_gUUs(
 			//input:
-			metricPrimGrid, 
+			metricPrimGrid,
+			dt_metricPrimGrid,	//first deriv
 			//output:
 			gLLs, gUUs, dt_gLLs);
 	});

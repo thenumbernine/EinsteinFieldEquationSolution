@@ -44,6 +44,7 @@ int main() {
 								/ (dxSq * 6. * M_PI);
 				}
 			});
+			phi.v = NULL;	//to skip the dtor.  very bad hack, I know.
 		},		//A
 		1e-50,	//epsilon
 		0	//maxiter

@@ -5,8 +5,8 @@
 -- ... I think fixing that last one will help the results converge.
 maxiter = 0
 
-initCond = 'flat'
---initCond = 'stellar_schwarzschild'
+--initCond = 'flat'
+initCond = 'stellar_schwarzschild'
 --initCond = 'stellar_kerr_newman'
 
 --solver = 'conjgrad'
@@ -14,7 +14,7 @@ initCond = 'flat'
 --solver = 'gmres'
 solver = 'jfnk'
 
-size = 4
+size = 16
 
 -- how big to construct the grid
 bodyRadii = 2

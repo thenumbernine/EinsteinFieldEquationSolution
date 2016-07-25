@@ -49,10 +49,11 @@ theta = pi/2.										# polar angle
 angularVelocity = 2. * pi / (60. * 60. * 24.) / c	# angular velocity, in m^-1
 inertia = 2. / 5. * M * R**2						# moment of inertia about a sphere, in m^3
 angularMomentum = inertia * angularVelocity			# angular momentum in m^2
-a = angularMomentum / M			
-Delta(r) = r**2 - 2.*m(r) * r + a**2
-Sigma(r) = r**2 + a**2 * cos(theta)**2
-kerr_gravity(r) = -2.*m(r) * Delta(r) * (r**2 - a**2 * cos(theta)**2) / (2 * Sigma(r)**3) * c**2
+earth_a = angularMomentum / M						# in m
+
+Delta(r,a) = r**2 - 2.*m(r) * r + a**2
+Sigma(r,a) = r**2 + a**2 * cos(theta)**2
+kerr_gravity(r,a) = -2.*m(r) * Delta(r,a) * (r**2 - a**2 * cos(theta)**2) / (2 * Sigma(r,a)**3) * c**2
 
 # show how schwarzschild alpha, d/dr alpha, g_tt, and Gamma^r_tt are all related:
 #plot [0:R*10.] schwarzschild_alpha(x) title 'schwarzschild alpha', schwarzschild_dr_alpha(x) title 'schwarzschild d_r alpha', schwarzschild_g_tt(x) title 'g_t_t', -schwarzschild_alpha(x) * schwarzschild_dr_alpha(x) title 'schwarzschild gravity = -Gamma_r_t_t = -alpha d_r alpha'
@@ -63,9 +64,14 @@ kerr_gravity(r) = -2.*m(r) * Delta(r) * (r**2 - a**2 * cos(theta)**2) / (2 * Sig
 #plot [0:R*10.] -newton_gravity(x) title 'newton gravity', -schwarzschild_gravity(x) title 'schwarzschild gravity', -kerr_gravity(x) title 'kerr gravity'
 
 # show differences in gravity 
+#set ylabel 'm/s^2'
+#plot [0:R*2.] abs(schwarzschild_gravity(x)) - abs(newton_gravity(x)) title '|schwarzschild|-|newton|', \
+#				abs(schwarzschild_gravity(x)) - abs(kerr_gravity(x,earth_a)) title '|schwarzschild|-|kerr|', \
+#				abs(newton_gravity(x)) - abs(kerr_gravity(x,earth_a)) title '|newton|-|kerr|'
+
+# rotation-less Kerr isn't the same as Schwarzschild ... It weaker than rotation Kerr.  It is within 2e-10 of rotation Kerr ... 2e-11 at the Earth's surface
+# note that Schwarzschild (which is rotation-less) is stronger than rotation-Kerr and rotation-less Kerr by about 1.4e-8
 set ylabel 'm/s^2'
-plot [0:R*2.] abs(schwarzschild_gravity(x)) - abs(newton_gravity(x)) title '|schwarzschild|-|newton|', \
-			abs(schwarzschild_gravity(x)) - abs(kerr_gravity(x)) title '|schwarzschild|-|kerr|', \
-			abs(newton_gravity(x)) - abs(kerr_gravity(x)) title '|newton|-|kerr|'
+plot [0:R*2.] abs(kerr_gravity(x,earth_a)) - abs(kerr_gravity(x,0)) title '|kerr w/rotation|-|kerr w/o rotation|'
 
 pause -1

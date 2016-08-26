@@ -45,4 +45,4 @@ set output 'images/kerr with vs. without rotation.png'
 plot [0:R*2.] abs(kerr_gravity(x,earth_a)) - abs(kerr_gravity(x,0)) title '|kerr w/rotation|-|kerr w/o rotation|'
 
 set output 'images/kerr fast rotation vs. kerr rotation.png'
-plot [0:R*2.] abs(kerr_gravity(x,200000*earth_a)) - abs(kerr_gravity(x,earth_a)) title '|kerr fast rotation|-|kerr w/rotation| ... how to double gravity only using rotation'
+plot [R:R*2.] abs(kerr_gravity(x,2200000*earth_a)) - abs(kerr_gravity(x,earth_a)) title '|kerr fast rotation|-|kerr w/rotation| ... how to double gravity only using rotation'

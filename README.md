@@ -21,14 +21,22 @@ Finite Difference Results:
 
 ![alt text](images/pic1.png)
 
+Volumetric graph of the gravitational acceleration using finite differencing for the Schwarzschild-based TOV equation of structure for the Earth's parameters.
+
+---
+
 ![alt text](images/schwarzschild_eos.png)
 
 Schwarzschild-based equations of structure with exhaggerated density.
+
+---
 
 ![alt text](images/schwarzschild_gravity.png)
 
 Schwarzschild-based EOS gravity using Earth's parameters.
 Taken from Misner, Thorne, and Wheeler's "Gravitation" box 23.2 on the TOV equations of structure starting from a Schwarzschild metric. 
+
+---
 
 ![alt text](images/gravity_differences.png)
 
@@ -36,10 +44,14 @@ Differences in between various gravity models, using Earth's parameters.
 Note that the Kerr metric is approximated within the body as the Kerr metric, using for mass all matter contained within the radial coordinate.
 This is not a correct equation of structure for the Kerr metric, as the correct Kerr EOS has not yet been solved for.
 
+---
+
 ![alt text](images/kerr with vs. without rotation.png)
 
 Difference between Kerr metric with and without rotation.
-Note that Kerr without rotation exhibits less gravitational force than Kerr with rotation, while Schwarzschild (which is rotation-less) exhibits more gravitational force than Kerr. 
+Note that Kerr without rotation exhibits less gravitational acceleration than Kerr with rotation, while Schwarzschild (which is rotation-less) exhibits more gravitational acceleration than Kerr. 
+
+---
 
 ![alt text](images/kerr fast rotation vs. kerr rotation.png)
 

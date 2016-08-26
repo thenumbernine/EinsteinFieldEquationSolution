@@ -1,4 +1,4 @@
-Einstein Field Equation solution calculator.
+# Einstein Field Equation solution calculator.
 
 Accepts stress-energy source terms of matter (density, specific internal energy, pressure) and electromagnetism (electric field, magnetic field).
 
@@ -18,13 +18,15 @@ goals:
 	However starting in flat or Schwarzschild stellar, it takes one step then gets stuck in a (local, I hope) minima.
 	Looking at distributions of numbers, the stellar and flat are both wrong: the stellar gets nonzero G_ab values in the vacuum (due to numeric errors of derivative approximations), and the flat gets nonzero G_ab values inside the body.
 
-Finite Difference Results:
+## Finite Difference Results:
 
 ![alt text](images/pic1.png)
 
 Volumetric graph of the gravitational acceleration using finite differencing for the Schwarzschild-based TOV equation of structure for the Earth's parameters.
 
 ---
+
+## Analytical Calculations:
 
 ![alt text](images/schwarzschild_eos.png)
 

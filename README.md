@@ -16,3 +16,27 @@ goals:
 	My goal is to start at flat space, given Earth's stress-energy source term, and come up with Earth's gravity, as the Schwarzschild analytical answer already gives us.
 	However starting in flat or Schwarzschild stellar, it takes one step then gets stuck in a (local, I hope) minima.
 	Looking at distributions of numbers, the stellar and flat are both wrong: the stellar gets nonzero G_ab values in the vacuum (due to numeric errors of derivative approximations), and the flat gets nonzero G_ab values inside the body.
+
+Finite Difference Results:
+
+![alt text](images/pic1.png)
+
+![alt text](images/schwarzschild_eos.png)
+
+Schwarzschild-based equations of structure with exhaggerated density.
+
+![alt text](images/schwarzschild_gravity.png)
+
+Schwarzschild-based EOS gravity using Earth's parameters.
+
+![alt text](images/gravity_differences.png)
+
+Differences in between various functions of gravity, using Earth's parameters.
+
+![alt text](images/kerr with vs. without rotation.png)
+
+Difference between Kerr metric with and without rotation.
+
+![alt text](images/kerr fast rotation vs. kerr rotation.png)
+
+Kerr metric increase in acceleration due to faster rotation.

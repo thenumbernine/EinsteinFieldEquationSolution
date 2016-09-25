@@ -14,7 +14,7 @@ initCond = 'stellar_schwarzschild'
 --solver = 'gmres'
 solver = 'jfnk'
 
-size = 64
+size = 16
 
 -- how big to construct the grid
 bodyRadii = 2

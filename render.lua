@@ -192,8 +192,14 @@ uniform sampler2D hsvTex;
 uniform vec3 normal;
 uniform float alpha;
 uniform float alphaGamma;
+uniform bool clipEnabled[4];
 void main() {
-	
+
+	vec4 worldPos = gl_ModelViewMatrix * vec4(pos,1.);
+	for (int i = 0; i < 4; ++i) {
+		if (clipEnabled[i] && dot(worldPos, gl_ClipPlane[i]) < 0.) discard;
+	}
+
 	float value = texture3D(volTex, pos).r;
 	vec4 voxelColor = vec4(texture2D(hsvTex, vec2(value, .5)).rgb, pow(alpha, alphaGamma));
 	
@@ -211,6 +217,7 @@ void main() {
 			'normal',
 			'alpha',
 			'alphaGamma',
+			'clipEnabled'
 		},
 	}
 	volumeShader:use()
@@ -302,9 +309,11 @@ function App:update()
 
 	for i,clipInfo in ipairs(clipInfos) do
 		gl.glClipPlane(gl.GL_CLIP_PLANE0+i-1, vec4d(clipInfo.plane:unpack()):ptr())
-		if clipInfo.enabled[0] then 
-			gl.glEnable(gl.GL_CLIP_PLANE0+i-1)
-		end
+-- intel/ubuntu was having trouble when the clip plane included the viewport
+-- so I moved the clipping code to the shader
+--		if clipInfo.enabled[0] then 
+--			gl.glEnable(gl.GL_CLIP_PLANE0+i-1)
+--		end
 	end
 
 	gl.glTranslatef(-.5, -.5, -.5)
@@ -316,6 +325,8 @@ function App:update()
 	hsvTex:bind(1)
 	gl.glUniform1f(volumeShader.uniforms.alpha, alpha[0])
 	gl.glUniform1f(volumeShader.uniforms.alphaGamma, alphaGamma[0])
+	gl.glUniform1iv(volumeShader.uniforms.clipEnabled, 4, 
+		ffi.new('int[4]', clipInfos:map(function(info) return info.enabled[0] end)))
 
 	gl.glEnable(gl.GL_TEXTURE_GEN_S)
 	gl.glEnable(gl.GL_TEXTURE_GEN_T)
@@ -506,9 +517,9 @@ function App:update()
 		gl.glEnable(gl.GL_DEPTH_TEST)
 	end
 
-	for i,clipInfo in ipairs(clipInfos) do
-		gl.glDisable(gl.GL_CLIP_PLANE0+i-1)
-	end
+--	for i,clipInfo in ipairs(clipInfos) do
+--		gl.glDisable(gl.GL_CLIP_PLANE0+i-1)
+--	end
 
 	glreport'here'
 

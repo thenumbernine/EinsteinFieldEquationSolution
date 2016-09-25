@@ -5,3 +5,5 @@ include ../Tensor/Include.mk
 include ../Solvers/Include.mk
 include ../LuaCxx/Include.mk
 include ../Parallel/Include.mk
+CXXFLAGS_linux+=-pthread
+LDFLAGS_linux+=-pthread

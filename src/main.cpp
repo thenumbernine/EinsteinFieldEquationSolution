@@ -74,27 +74,27 @@ enum { subDim = 3 };	//spatial dim
 enum { dim = subDim+1 };
 
 //subDim
-typedef Tensor<real, Lower<subDim>> TensorLsub;
-typedef Tensor<real, Upper<subDim>> TensorUsub;
-typedef Tensor<real, Symmetric<Upper<subDim>, Upper<subDim>>> TensorSUsub;
-typedef Tensor<real, Symmetric<Lower<subDim>, Lower<subDim>>> TensorSLsub;
-typedef Tensor<real, Upper<subDim>, Lower<subDim>> TensorULsub;
+typedef ::Tensor::Tensor<real, Lower<subDim>> TensorLsub;
+typedef ::Tensor::Tensor<real, Upper<subDim>> TensorUsub;
+typedef ::Tensor::Tensor<real, Symmetric<Upper<subDim>, Upper<subDim>>> TensorSUsub;
+typedef ::Tensor::Tensor<real, Symmetric<Lower<subDim>, Lower<subDim>>> TensorSLsub;
+typedef ::Tensor::Tensor<real, Upper<subDim>, Lower<subDim>> TensorULsub;
 
 //dim
-typedef Tensor<real, Upper<dim>> TensorU;
-typedef Tensor<real, Lower<dim>> TensorL;
-typedef Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> TensorSL;
-typedef Tensor<real, Symmetric<Upper<dim>, Upper<dim>>> TensorSU;
-typedef Tensor<real, Upper<dim>, Lower<dim>> TensorUL;
-typedef Tensor<real, Lower<dim>, Symmetric<Lower<dim>, Lower<dim>>> TensorLSL;
-typedef Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>> TensorUSL;
-typedef Tensor<real, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> TensorSLL;
-typedef Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> TensorUSLL;
-typedef Tensor<real, Upper<dim>, Lower<dim>, Lower<dim>, Lower<dim>> TensorULLL;
+typedef ::Tensor::Tensor<real, Upper<dim>> TensorU;
+typedef ::Tensor::Tensor<real, Lower<dim>> TensorL;
+typedef ::Tensor::Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> TensorSL;
+typedef ::Tensor::Tensor<real, Symmetric<Upper<dim>, Upper<dim>>> TensorSU;
+typedef ::Tensor::Tensor<real, Upper<dim>, Lower<dim>> TensorUL;
+typedef ::Tensor::Tensor<real, Lower<dim>, Symmetric<Lower<dim>, Lower<dim>>> TensorLSL;
+typedef ::Tensor::Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>> TensorUSL;
+typedef ::Tensor::Tensor<real, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> TensorSLL;
+typedef ::Tensor::Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> TensorUSLL;
+typedef ::Tensor::Tensor<real, Upper<dim>, Lower<dim>, Lower<dim>, Lower<dim>> TensorULLL;
 
 //mixed subDim & dim
-typedef Tensor<real, Lower<subDim>, Symmetric<Lower<dim>, Lower<dim>>> TensorLsubSL;
-typedef Tensor<real, Lower<subDim>, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>> TensorLsubUSL;
+typedef ::Tensor::Tensor<real, Lower<subDim>, Symmetric<Lower<dim>, Lower<dim>>> TensorLsubSL;
+typedef ::Tensor::Tensor<real, Lower<subDim>, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>> TensorLsubUSL;
 
 template<typename T>
 struct gridFromPtr {
@@ -877,7 +877,7 @@ struct KrylovSolver : public EFESolver {
 		const Grid<MetricPrims, subDim>& dt_metricPrimGrid	//first deriv
 	) {
 //debugging
-for (int i = 0; i < getN(); ++i) {
+for (int i = 0; i < (int)getN(); ++i) {
 	assert(x[i] == x[i]);
 }
 
@@ -907,7 +907,7 @@ for (int i = 0; i < getN(); ++i) {
 				//output
 				gy.grid);
 //debugging
-for (int i = 0; i < getN(); ++i) {
+for (int i = 0; i < (int)getN(); ++i) {
 	assert(y[i] == y[i]);
 }
 
@@ -992,7 +992,7 @@ struct ConjRes : public Solvers::ConjRes<real> {
 	using Solvers::ConjRes<real>::ConjRes;
 	virtual real calcResidual(real rNormL2, real bNormL2, const real* r) {
 //debugging
-for (int i = 0; i < n; ++i) {
+for (int i = 0; i < (int)n; ++i) {
 assert(r[i] == r[i]);
 }
 		std::cout << "ConjRes::calcResidual"
@@ -1084,7 +1084,7 @@ struct JFNK : public Solvers::JFNK<real> {
 
 		//residual is only used to compare whether somethig is better or worse than somethign else, so scale it up
 		real sum = 0;
-		for (int i = 0; i < n; ++i) {
+		for (int i = 0; i < (int)n; ++i) {
 			sum += r[i] * r[i];
 		}
 		real residual = sqrt(sum) / (8. * M_PI) * c * c / G / 1000.;
@@ -1221,7 +1221,7 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 			return false;
 		};
 		jfnk.getLinearSolver()->MInv = [&](real* y, const real* x) {
-			for (int i = 0; i < getN(); ++i) {
+			for (int i = 0; i < (int)getN(); ++i) {
 				y[i] = x[i] / (8. * M_PI) * c * c / G / 1000.;
 			}
 		};

@@ -1504,6 +1504,20 @@ int main(int argc, char** argv) {
 					}
 				}
 			}},
+	
+#if 1
+			{"rotating_EM_field", [&](Vector<int,subDim> index){
+				MetricPrims& metricPrims = metricPrimGrid(index);
+				const Vector<real,subDim>& xi = xs(index);
+				
+				real x = xi(0);
+				real y = xi(1);
+				real z = xi(2);
+			
+				//define EM field here
+				//...and its first derivative
+			}},
+#endif
 		}, *p;
 
 		std::function<void(Vector<int,subDim>)> initCond;

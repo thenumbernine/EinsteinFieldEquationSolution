@@ -1,4 +1,4 @@
-#!/opt/local/bin/gnuplot -p
+#! /usr/bin/gnuplot -p
 
 set terminal png size 800,600
 

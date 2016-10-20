@@ -50,7 +50,7 @@ int main() {
 		0	//maxiter
 	);
 	solver.stopCallback = [&]()->bool{
-		std::cout << solver.residual << "\t" << solver.iter << std::endl;
+		std::cout << solver.getResidual() << "\t" << solver.getIter() << std::endl;
 		return false;
 	};
 	solver.solve();

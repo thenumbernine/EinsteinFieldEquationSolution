@@ -1,0 +1,3 @@
+distName='MagneticField'
+distType='app'
+depends:append{'../../Common', '../../Tensor', '../../Solvers', '../../Parallel'}

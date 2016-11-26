@@ -206,25 +206,6 @@ const real c = 299792458;	// m/s
 const real G = 6.67384e-11;	// m^3 / (kg s^2)
 //const real kB = 1.3806488e-23;	// m^2 kg / (K s^2)
 
-
-#if 1	//earth
-const real radius = 6.37101e+6;	// m
-const real mass = 5.9736e+24 * G / c / c;	// m
-#endif
-#if 0	//sun
-const real radius = 6.960e+8;	// m
-const real mass = 1.9891e+30 * G / c / c;	// m
-#endif
-const real volume = 4./3.*M_PI*radius*radius*radius;	// m^3
-//earth volume: 1.0832120174985e+21 m^3
-const real density = mass / volume;	// 1/m^2
-//earth density: 4.0950296770075e-24 1/m^2 = 5.5147098661212 g/cm^3, which is what Google says.
-//note that G_tt = 8 pi T_tt = 8 pi rho ... for earth = 1.0291932119615e-22 m^-2
-//const real schwarzschildRadius = 2 * mass;	//Schwarzschild radius: 8.87157 mm, which is accurate
-
-//earth magnetic field at surface: .25-.26 gauss
-const real magneticField = .45 * sqrt(.1 * G) / c;	// 1/m
-
 //grid coordinate bounds
 Vector<real, subDim> xmin, xmax;
 Vector<int, subDim> sizev;
@@ -1232,12 +1213,292 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 	}
 };
 
+struct SphericalBody {
+	real radius, mass;
+	//derived:
+	real volume, density;
+	
+	SphericalBody(real radius_, real mass_)
+	: radius(radius_),
+	mass(mass_),
+	volume(4./3.*M_PI*radius*radius*radius),	// m^3
+	density(mass / volume)	// 1/m^2
+	{}
+
+	virtual void initStressEnergyPrim(
+		Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
+		const Grid<Vector<real, subDim>, subDim>& xs
+	) {
+		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
+			StressEnergyPrims &stressEnergyPrims = stressEnergyPrimGrid(index);
+			real r = Vector<real, subDim>::length(xs(index));
+			stressEnergyPrims.rho = r < radius ? density : 0;	// average density of Earth in m^-2
+			stressEnergyPrims.eInt = 0;	//internal energy / temperature of the Earth?
+			stressEnergyPrims.P = 0;	//pressure inside the Earth?
+			for (int i = 0; i < subDim; ++i) {
+				stressEnergyPrims.v(i) = 0;	//3-velocity
+				stressEnergyPrims.E(i) = 0;	//electric field
+				stressEnergyPrims.B(i) = 0;	//magnetic field
+			}	
+		});
+	}
+};
+
+struct InitCond {
+	virtual void initMetricPrims(
+		Grid<MetricPrims, subDim>& metricPrimGrid,
+		const Grid<Vector<real, subDim>, subDim>& xs
+	) = 0;
+};
+
+struct SphericalBodyInitCond : public InitCond {
+	std::shared_ptr<SphericalBody> body;	
+	SphericalBodyInitCond(std::shared_ptr<SphericalBody> body_) : body(body_) {}
+};
+
+struct FlatInitCond : public InitCond {
+	//substitute the schwarzschild R for 2 m(r)
+	virtual void initMetricPrims(
+		Grid<MetricPrims, subDim>& metricPrimGrid,
+		const Grid<Vector<real, subDim>, subDim>& xs
+	) {
+		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
+			MetricPrims& metricPrims = metricPrimGrid(index);
+			metricPrims.alpha = 1;
+			for (int i = 0; i < subDim; ++i) {
+				metricPrims.betaU(i) = 0;
+				for (int j = 0; j <= i; ++j) {
+					metricPrims.gammaLL(i,j) = (real)(i == j);
+				}
+			}
+		});
+	}
+};
+
+/*
+The stellar Schwarzschild initial conditions have constraint value of zero outside Earth (good)
+but inside Earth they give a difference of 2 g/cm^3 ... off from the Earth's density of 5.51 g/cm^3
+*/
+struct StellarSchwarzschildInitCond : public SphericalBodyInitCond {
+	using SphericalBodyInitCond::SphericalBodyInitCond;
+	virtual void initMetricPrims(
+		Grid<MetricPrims, subDim>& metricPrimGrid,
+		const Grid<Vector<real, subDim>, subDim>& xs
+	) {
+		real radius = body->radius;
+		real density = body->density;
+		real mass = body->mass;
+		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
+			MetricPrims& metricPrims = metricPrimGrid(index);
+			const Vector<real, subDim>& xi = xs(index);
+			real r = Vector<real, subDim>::length(xi);
+			real matterRadius = std::min<real>(r, radius);
+			real volumeOfMatterRadius = 4./3.*M_PI*matterRadius*matterRadius*matterRadius;
+			real m = density * volumeOfMatterRadius;	// m^3		
+			
+			/*
+			g_ti = beta_i = 0
+			g_tt = -alpha^2 + beta^2 = -alpha^2 = -1 + Rs/r <=> alpha = sqrt(1 - Rs/r)
+			g_ij = gamma_ij = delta_ij + x^i x^j / r^2 2M/(r - 2M)		<- but x is upper, and you can't lower it without specifying gamma_ij
+			 ... which might be why the contravariant spatial metrics of spherical and cartesian look so similar 
+			*/
+			/*
+			I'm going by MTW box 23.2 eqn 6 d/dt (proper time) = sqrt(1 - R/r) for r > R
+				and ( 3/2 sqrt(1 - 2 M / R) - 1/2 sqrt(1 - 2 M r^2 / R^3) ) for r < R
+				for M = total mass 
+				and R = planet radius 
+			*/
+			metricPrims.alpha = r > radius 
+				? sqrt(1 - 2*mass/r)
+				: (1.5 * sqrt(1 - 2*mass/radius) - .5 * sqrt(1 - 2*mass*r*r/(radius*radius*radius)));
+			
+			for (int i = 0; i < subDim; ++i) {
+				metricPrims.betaU(i) = 0;
+				for (int j = 0; j <= i; ++j) {
+					metricPrims.gammaLL(i,j) = (real)(i == j) + xi(i)/r * xi(j)/r * 2*m/(r - 2*m);
+					/*
+					dr^2's coefficient
+					spherical: 1/(1 - 2M/r) = 1/((r - 2M)/r) = r/(r - 2M)
+					spherical contravariant: 1 - 2M/r
+					cartesian contravariant: delta_ij - x/r y/r 2M/r
+					hmm, contravariant terms of cartesian vs spherical look more similar than covariant terms do
+				
+					in the OV metric, dr^2's coefficient is exp(2 Lambda) = 1/(1 - 2 m(r) / r) where m(r) is the enclosing mass
+					so the contravariant coefficient would be exp(-2 Lambda) = 1 - 2 m(r) / r
+					I'm going to do the lazy thing and guess this converts to delta^ij - 2 m(r) x^i x^j / r^3
+					*/
+				}
+			}
+
+#if 0	//rotating about a distance
+			/*
+			now if we are going to rotate this
+			at a distance of L and at an angular frequency of omega
+			(not considering relativistic Thomas precession just yet)
+			
+			this might be a mess, but I'm (1) calculating the change in time as if I were in a frame rotating by L exp(i omega t)
+			then (2) re-centering the frame at L exp(i omega t) ... so I can use the original coordinate system
+			*/
+			real dr_alpha = r > radius 
+				? (mass / (r * r * sqrt(1. - 2. * mass / r))) 
+				: (mass * r / (radius * radius * radius * sqrt(1. - 2. * mass * r * r / (radius * radius * radius))));
+			real dr_m = r > radius ? 0 : (4. * M_PI * r * r * density);
+			MetricPrims& dt_metricPrims = dt_metricPrimGrid(index);
+			real L = 149.6e+9;	//distance from earth to sun, in m 
+			//real omega = 0; //no rotation
+			//real omega = 2. * M_PI / (60. * 60. * 24. * 365.25) / c;	//one revolution per year in m^-1 
+			//real omega = 1;	//angular velocity of the speed of light
+			real omega = c;	//I'm trying to find a difference ...
+			real t = 0;	//where the position should be.  t=0 means the body is moved by [L, 0], and its derivatives are along [0, L omega] 
+			Vector<real,2> dt_xHat(L * omega * sin(omega * t), -L * omega * cos(omega * t));
+			dt_metricPrims.alpha = dr_alpha * (xi(0)/r * dt_xHat(0) + xi(1)/r * dt_xHat(1));
+			for (int i = 0; i < subDim; ++i) {
+				dt_metricPrims.betaU(i) = 0;
+			}
+			for (int i = 0; i < subDim; ++i) {
+				for (int j = 0; j < subDim; ++j) {
+					real sum = 0;
+					for (int k = 0; k < 2; ++k) {
+						//gamma_ij = f/g
+						//so d/dxHat^k gamma_ij = 
+						real dxHat_k_of_gamma_ij = 
+						// f' / g
+						(
+							((i==k)*xi(j) + xi(i)*(j==k)) * 2.*m + xi(i)*xi(j) * 2.*dr_m * xi(k)/r
+						) / (r * r * (r - 2 * m))
+						// - f g' / g^2
+						- (xi(i) * xi(j) * 2 * m) * ( (xi(k) - 2 * dr_m * xi(k)) * r + 2 * xi(k) * (r - 2 * m) )
+						/ (r * r * r * r * (r - 2 * m) * (r - 2 * m));
+						sum += dxHat_k_of_gamma_ij * dt_xHat(k);
+					}
+					dt_metricPrims.gammaLL(i,j) = sum;
+				}
+			}
+#endif
+
+#if 0	//work that beta
+			/*
+			so if we can get the gamma^ij beta_j,t components to equal the Gamma^t_tt components ...
+			 voila, gravity goes away.
+			I'm approximating this as beta^i_,t ... but it really is beta^j_,t gamma_ij + beta^j gamma_ij,t
+			 ... which is the same as what I've got, but I'm setting gamma_ij,t to zero
+			*/
+			//expanding ...
+			MetricPrims& dt_metricPrims = dt_metricPrimGrid(index);
+			TensorLsub betaL;
+			for (int i = 0; i < subDim; ++i) {
+				//negate all gravity by throttling the change in space/time coupling of the metric
+				real dm_dr = 0;
+				betaL(i) = -(2*m * (r - 2*m) + 2 * dm_dr * r * (2*m - r)) / (2 * r * r * r) * xi(i)/r;
+			}
+			TensorSUsub gammaUU = inverse(metricPrims.gammaLL);
+			for (int i = 0; i < subDim; ++i) {
+				real sum = 0;
+				for (int j = 0; j < subDim; ++j) {
+					sum += gammaUU(i,j) * betaL(j);
+				}
+				dt_metricPrims.betaU(i) = sum;
+			}
+#endif
+		});
+	}
+};
+
+struct StellarKerrNewmanInitCond : public SphericalBodyInitCond {
+	using SphericalBodyInitCond::SphericalBodyInitCond;
+	virtual void initMetricPrims(
+		Grid<MetricPrims, subDim>& metricPrimGrid,
+		const Grid<Vector<real, subDim>, subDim>& xs
+	) {
+		real radius = body->radius;
+		real mass = body->mass;
+		real density = body->density;
+		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
+			MetricPrims& metricPrims = metricPrimGrid(index);
+			const Vector<real,subDim>& xi = xs(index);
+			
+			real x = xi(0);
+			real y = xi(1);
+			real z = xi(2);
+			
+			real angularVelocity = 2. * M_PI / (60. * 60. * 24.) / c;	//angular velocity, in m^-1
+			real inertia = 2. / 5. * mass * radius * radius;	//moment of inertia about a sphere, in m^3
+			real angularMomentum = inertia * angularVelocity;	//angular momentum in m^2
+			real a = angularMomentum / mass;	//m
+			
+			//real r is the solution of (x*x + y*y) / (r*r + a*a) + z*z / (r*r) = 1 
+			// r^4 - (x^2 + y^2 + z^2 - a^2) r^2 - a^2 z^2 = 0
+			real RSq_minus_aSq = x*x + y*y + z*z - a*a;
+			//so we have two solutions ... which do we use? 
+			//from gnuplot it looks like the two of these are the same ...
+			real r = sqrt((RSq_minus_aSq + sqrt(RSq_minus_aSq * RSq_minus_aSq + 4.*a*a*z*z)) / 2.);	//use the positive root
+
+			//should I use the Kerr-Schild 'r' coordinate?
+			//well, if 'm' is the mass enclosed within the coordinate
+			// and that determines 'a', the angular momentum per mass within the coordinate (should it?)
+			// then we would have a circular definition
+			//real R = sqrt(x*x + y*y + z*z); 
+			real matterRadius = std::min<real>(r, radius);
+			real volumeOfMatterRadius = 4./3.*M_PI*matterRadius*matterRadius*matterRadius;
+			real m = density * volumeOfMatterRadius;	// m^3
+
+			real Q = 0;	//charge
+			real H = (r*m - Q*Q/2.)/(r*r + a*a*z*z/(r*r));
+		
+			//3.4.33 through 3.4.35 of Alcubierre "Introduction to 3+1 Numerical Relativity"
+			
+			/*TODO fix this for the metric within the star
+			 in other news, this is an unsolved problem!
+			https://arxiv.org/pdf/1503.02172.pdf section 3.11
+			https://arxiv.org/pdf/1410.2130.pdf section 4.2 last paragraph
+			*/
+			//metricPrims.alpha = 1./sqrt(1. + 2*H);
+			metricPrims.alpha = sqrt(1. - 2*H/(1+2*H) );
+			
+			Vector<real,subDim> l( (r*x + a*y)/(r*r + a*a), (r*y - a*x)/(r*r + a*a), z/r );
+			for (int i = 0; i < subDim; ++i) {
+				metricPrims.betaU(i) = 2. * H * l(i) / (1. + 2. * H);
+				for (int j = 0; j <= i; ++j) {
+					metricPrims.gammaLL(i,j) = (real)(i == j) + 2 * H * l(i) * l(j); 
+				}
+			}
+		});
+	}
+};
+
+struct RotatingEMFieldInitCond : public InitCond {
+	virtual void initMetricPrims(
+		Grid<MetricPrims, subDim>& metricPrimGrid,
+		const Grid<Vector<real, subDim>, subDim>& xs
+	) {
+		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
+			MetricPrims& metricPrims = metricPrimGrid(index);
+			const Vector<real,subDim>& xi = xs(index);
+			
+			real x = xi(0);
+			real y = xi(1);
+			real z = xi(2);
+		
+			//define EM field here
+			//...and its first derivative
+		
+			//E_i = A_t,i - A_i,t
+			//B_i = epsilon_i^jk A_k,j
+		});
+	}
+};
+
 int main(int argc, char** argv) {	
 
-	std::cout << "mass=" << mass << std::endl;		//m
-	std::cout << "radius=" << radius << std::endl;	//m
-	std::cout << "volume=" << volume << std::endl;	//m^3
-	std::cout << "density=" << density << std::endl;	//m^-2
+	//std::cout << "mass=" << mass << std::endl;		//m
+	//std::cout << "radius=" << radius << std::endl;	//m
+	//std::cout << "volume=" << volume << std::endl;	//m^3
+	//std::cout << "density=" << density << std::endl;	//m^-2
 
 	LuaCxx::State lua;
 	lua.loadFile("config.lua");
@@ -1245,11 +1506,15 @@ int main(int argc, char** argv) {
 	int maxiter = std::numeric_limits<int>::max();
 	if (!lua["maxiter"].isNil()) lua["maxiter"] >> maxiter;	
 	std::cout << "maxiter=" << maxiter << std::endl;
-	
+
+	std::string bodyName = "earth";
+	if (!lua["body"].isNil()) lua["body"] >> bodyName;
+	std::cout << "body=\"" << bodyName << "\"" << std::endl;
+
 	std::string initCondName = "stellar_schwarzschild";
 	if (!lua["initCond"].isNil()) lua["initCond"] >> initCondName;
 	std::cout << "initCond=\"" << initCondName << "\"" << std::endl;
-	
+
 	std::string solverName = "jfnk";
 	if (!lua["solver"].isNil()) lua["solver"] >> solverName;	
 	std::cout << "solver=\"" << solverName << "\"" << std::endl;
@@ -1262,8 +1527,46 @@ int main(int argc, char** argv) {
 	if (!lua["bodyRadii"].isNil()) lua["bodyRadii"] >> bodyRadii;
 	std::cout << "bodyRadii=" << bodyRadii << std::endl;
 
-	xmin = Vector<real, subDim>(-bodyRadii*radius, -bodyRadii*radius, -bodyRadii*radius),
-	xmax = Vector<real, subDim>(bodyRadii*radius, bodyRadii*radius, bodyRadii*radius);
+
+	std::shared_ptr<SphericalBody> body;
+	{
+		struct {
+			const char* name;
+			std::function<std::shared_ptr<SphericalBody>()> func;
+		} bodies[] = {
+			{"earth", [&](){
+				const real earthRadius = 6.37101e+6;	// m
+				const real earthMass = 5.9736e+24 * G / c / c;	// m
+				//earth volume: 1.0832120174985e+21 m^3
+				//earth density: 4.0950296770075e-24 1/m^2 = 5.5147098661212 g/cm^3, which is what Google says.
+				//note that G_tt = 8 pi T_tt = 8 pi rho ... for earth = 1.0291932119615e-22 m^-2
+				//const real schwarzschildRadius = 2 * mass;	//Schwarzschild radius: 8.87157 mm, which is accurate
+				//earth magnetic field at surface: .25-.26 gauss
+				const real earthMagneticField = .45 * sqrt(.1 * G) / c;	// 1/m
+				return std::make_shared<SphericalBody>(earthRadius, earthMass);
+			}},
+		
+			{"sun", [&](){
+				const real sunRadius = 6.960e+8;	// m
+				const real sunMass = 1.9891e+30 * G / c / c;	// m
+				return std::make_shared<SphericalBody>(sunRadius, sunMass);
+			}},
+		}, *p;
+	
+		for (p = bodies; p < endof(bodies); ++p) {
+			if (p->name == bodyName) {
+				body = p->func();
+				break;
+			}
+		}
+		if (!body) {
+			throw Common::Exception() << "couldn't find body named " << bodyName;
+		}
+	}
+
+
+	xmin = Vector<real, subDim>(-bodyRadii*body->radius, -bodyRadii*body->radius, -bodyRadii*body->radius),
+	xmax = Vector<real, subDim>(bodyRadii*body->radius, bodyRadii*body->radius, bodyRadii*body->radius);
 	sizev = Vector<int, subDim>(size, size, size);
 	gridVolume = sizev.volume();
 	dx = (xmax - xmin) / sizev;
@@ -1303,227 +1606,32 @@ int main(int argc, char** argv) {
 
 	//specify stress-energy primitives
 	//the stress-energy primitives combined with the current metric are used to compute the stress-energy tensor 
+	//this is done by choosing the 'body'
+
+	//initialize metric primitives
 	time("calculating stress-energy primitives", [&]{
-		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
-		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
-			StressEnergyPrims &stressEnergyPrims = stressEnergyPrimGrid(index);
-			real r = Vector<real, subDim>::length(xs(index));
-			stressEnergyPrims.rho = r < radius ? density : 0;	// average density of Earth in m^-2
-			stressEnergyPrims.eInt = 0;	//internal energy / temperature of the Earth?
-			stressEnergyPrims.P = 0;	//pressure inside the Earth?
-			for (int i = 0; i < subDim; ++i) {
-				stressEnergyPrims.v(i) = 0;	//3-velocity
-				stressEnergyPrims.E(i) = 0;	//electric field
-				stressEnergyPrims.B(i) = 0;	//magnetic field
-			}
-		});
+		body->initStressEnergyPrim(stressEnergyPrimGrid, xs);
 	});
+
 
 	{
 		struct {
 			const char* name;
-			std::function<void(Vector<int,subDim>)> func;
+			std::function<std::shared_ptr<InitCond>()> func;
 		} initConds[] = {
-			{"flat", [&](Vector<int,subDim> index){
-				//substitute the schwarzschild R for 2 m(r)
-				MetricPrims& metricPrims = metricPrimGrid(index);
-				metricPrims.alpha = 1;
-				for (int i = 0; i < subDim; ++i) {
-					metricPrims.betaU(i) = 0;
-					for (int j = 0; j <= i; ++j) {
-						metricPrims.gammaLL(i,j) = (real)(i == j);
-					}
-				}
-			}},
-			
-			/*
-			The stellar Schwarzschild initial conditions have constraint value of zero outside Earth (good)
-			but inside Earth they give a difference of 2 g/cm^3 ... off from the Earth's density of 5.51 g/cm^3
-			*/
-			{"stellar_schwarzschild", [&](Vector<int,subDim> index){
-				MetricPrims& metricPrims = metricPrimGrid(index);
-				const Vector<real, subDim>& xi = xs(index);
-				real r = Vector<real, subDim>::length(xi);
-				real matterRadius = std::min<real>(r, radius);
-				real volumeOfMatterRadius = 4./3.*M_PI*matterRadius*matterRadius*matterRadius;
-				real m = density * volumeOfMatterRadius;	// m^3		
-				
-				/*
-				g_ti = beta_i = 0
-				g_tt = -alpha^2 + beta^2 = -alpha^2 = -1 + Rs/r <=> alpha = sqrt(1 - Rs/r)
-				g_ij = gamma_ij = delta_ij + x^i x^j / r^2 2M/(r - 2M)		<- but x is upper, and you can't lower it without specifying gamma_ij
-				 ... which might be why the contravariant spatial metrics of spherical and cartesian look so similar 
-				*/
-				/*
-				I'm going by MTW box 23.2 eqn 6 d/dt (proper time) = sqrt(1 - R/r) for r > R
-					and ( 3/2 sqrt(1 - 2 M / R) - 1/2 sqrt(1 - 2 M r^2 / R^3) ) for r < R
-					for M = total mass 
-					and R = planet radius 
-				*/
-				metricPrims.alpha = r > radius 
-					? sqrt(1 - 2*mass/r)
-					: (1.5 * sqrt(1 - 2*mass/radius) - .5 * sqrt(1 - 2*mass*r*r/(radius*radius*radius)));
-				
-				for (int i = 0; i < subDim; ++i) {
-					metricPrims.betaU(i) = 0;
-					for (int j = 0; j <= i; ++j) {
-						metricPrims.gammaLL(i,j) = (real)(i == j) + xi(i)/r * xi(j)/r * 2*m/(r - 2*m);
-						/*
-						dr^2's coefficient
-						spherical: 1/(1 - 2M/r) = 1/((r - 2M)/r) = r/(r - 2M)
-						spherical contravariant: 1 - 2M/r
-						cartesian contravariant: delta_ij - x/r y/r 2M/r
-						hmm, contravariant terms of cartesian vs spherical look more similar than covariant terms do
-					
-						in the OV metric, dr^2's coefficient is exp(2 Lambda) = 1/(1 - 2 m(r) / r) where m(r) is the enclosing mass
-						so the contravariant coefficient would be exp(-2 Lambda) = 1 - 2 m(r) / r
-						I'm going to do the lazy thing and guess this converts to delta^ij - 2 m(r) x^i x^j / r^3
-						*/
-					}
-				}
-
-#if 0	//rotating about a distance
-				/*
-				now if we are going to rotate this
-				at a distance of L and at an angular frequency of omega
-				(not considering relativistic Thomas precession just yet)
-				
-				this might be a mess, but I'm (1) calculating the change in time as if I were in a frame rotating by L exp(i omega t)
-				then (2) re-centering the frame at L exp(i omega t) ... so I can use the original coordinate system
-				*/
-				real dr_alpha = r > radius 
-					? (mass / (r * r * sqrt(1. - 2. * mass / r))) 
-					: (mass * r / (radius * radius * radius * sqrt(1. - 2. * mass * r * r / (radius * radius * radius))));
-				real dr_m = r > radius ? 0 : (4. * M_PI * r * r * density);
-				MetricPrims& dt_metricPrims = dt_metricPrimGrid(index);
-				real L = 149.6e+9;	//distance from earth to sun, in m 
-				//real omega = 0; //no rotation
-				//real omega = 2. * M_PI / (60. * 60. * 24. * 365.25) / c;	//one revolution per year in m^-1 
-				//real omega = 1;	//angular velocity of the speed of light
-				real omega = c;	//I'm trying to find a difference ...
-				real t = 0;	//where the position should be.  t=0 means the body is moved by [L, 0], and its derivatives are along [0, L omega] 
-				Vector<real,2> dt_xHat(L * omega * sin(omega * t), -L * omega * cos(omega * t));
-				dt_metricPrims.alpha = dr_alpha * (xi(0)/r * dt_xHat(0) + xi(1)/r * dt_xHat(1));
-				for (int i = 0; i < subDim; ++i) {
-					dt_metricPrims.betaU(i) = 0;
-				}
-				for (int i = 0; i < subDim; ++i) {
-					for (int j = 0; j < subDim; ++j) {
-						real sum = 0;
-						for (int k = 0; k < 2; ++k) {
-							//gamma_ij = f/g
-							//so d/dxHat^k gamma_ij = 
-							real dxHat_k_of_gamma_ij = 
-							// f' / g
-							(
-								((i==k)*xi(j) + xi(i)*(j==k)) * 2.*m + xi(i)*xi(j) * 2.*dr_m * xi(k)/r
-							) / (r * r * (r - 2 * m))
-							// - f g' / g^2
-							- (xi(i) * xi(j) * 2 * m) * ( (xi(k) - 2 * dr_m * xi(k)) * r + 2 * xi(k) * (r - 2 * m) )
-							/ (r * r * r * r * (r - 2 * m) * (r - 2 * m));
-							sum += dxHat_k_of_gamma_ij * dt_xHat(k);
-						}
-						dt_metricPrims.gammaLL(i,j) = sum;
-					}
-				}
-#endif
-
-#if 0	//work that beta
-				/*
-				so if we can get the gamma^ij beta_j,t components to equal the Gamma^t_tt components ...
-				 voila, gravity goes away.
-				I'm approximating this as beta^i_,t ... but it really is beta^j_,t gamma_ij + beta^j gamma_ij,t
-				 ... which is the same as what I've got, but I'm setting gamma_ij,t to zero
-				*/
-				//expanding ...
-				MetricPrims& dt_metricPrims = dt_metricPrimGrid(index);
-				TensorLsub betaL;
-				for (int i = 0; i < subDim; ++i) {
-					//negate all gravity by throttling the change in space/time coupling of the metric
-					real dm_dr = 0;
-					betaL(i) = -(2*m * (r - 2*m) + 2 * dm_dr * r * (2*m - r)) / (2 * r * r * r) * xi(i)/r;
-				}
-				TensorSUsub gammaUU = inverse(metricPrims.gammaLL);
-				for (int i = 0; i < subDim; ++i) {
-					real sum = 0;
-					for (int j = 0; j < subDim; ++j) {
-						sum += gammaUU(i,j) * betaL(j);
-					}
-					dt_metricPrims.betaU(i) = sum;
-				}
-#endif
-			}},
+			{"flat", [&](){ return std::make_shared<FlatInitCond>(); }},
 		
-			{"stellar_kerr_newman", [&](Vector<int,subDim> index){
-				MetricPrims& metricPrims = metricPrimGrid(index);
-				const Vector<real,subDim>& xi = xs(index);
-				
-				real x = xi(0);
-				real y = xi(1);
-				real z = xi(2);
-				
-				real angularVelocity = 2. * M_PI / (60. * 60. * 24.) / c;	//angular velocity, in m^-1
-				real inertia = 2. / 5. * mass * radius * radius;	//moment of inertia about a sphere, in m^3
-				real angularMomentum = inertia * angularVelocity;	//angular momentum in m^2
-				real a = angularMomentum / mass;	//m
-				
-				//real r is the solution of (x*x + y*y) / (r*r + a*a) + z*z / (r*r) = 1 
-				// r^4 - (x^2 + y^2 + z^2 - a^2) r^2 - a^2 z^2 = 0
-				real RSq_minus_aSq = x*x + y*y + z*z - a*a;
-				//so we have two solutions ... which do we use? 
-				//from gnuplot it looks like the two of these are the same ...
-				real r = sqrt((RSq_minus_aSq + sqrt(RSq_minus_aSq * RSq_minus_aSq + 4.*a*a*z*z)) / 2.);	//use the positive root
-
-				//should I use the Kerr-Schild 'r' coordinate?
-				//well, if 'm' is the mass enclosed within the coordinate
-				// and that determines 'a', the angular momentum per mass within the coordinate (should it?)
-				// then we would have a circular definition
-				//real R = sqrt(x*x + y*y + z*z); 
-				real matterRadius = std::min<real>(r, radius);
-				real volumeOfMatterRadius = 4./3.*M_PI*matterRadius*matterRadius*matterRadius;
-				real m = density * volumeOfMatterRadius;	// m^3
-
-				real Q = 0;	//charge
-				real H = (r*m - Q*Q/2.)/(r*r + a*a*z*z/(r*r));
-			
-				//3.4.33 through 3.4.35 of Alcubierre "Introduction to 3+1 Numerical Relativity"
-				
-				/*TODO fix this for the metric within the star
-				 in other news, this is an unsolved problem!
-				https://arxiv.org/pdf/1503.02172.pdf section 3.11
-				https://arxiv.org/pdf/1410.2130.pdf section 4.2 last paragraph
-				*/
-				//metricPrims.alpha = 1./sqrt(1. + 2*H);
-				metricPrims.alpha = sqrt(1. - 2*H/(1+2*H) );
-				
-				Vector<real,subDim> l( (r*x + a*y)/(r*r + a*a), (r*y - a*x)/(r*r + a*a), z/r );
-				for (int i = 0; i < subDim; ++i) {
-					metricPrims.betaU(i) = 2. * H * l(i) / (1. + 2. * H);
-					for (int j = 0; j <= i; ++j) {
-						metricPrims.gammaLL(i,j) = (real)(i == j) + 2 * H * l(i) * l(j); 
-					}
-				}
-			}},
+			// depend on body:
+			{"stellar_schwarzschild", [&](){ return std::make_shared<StellarSchwarzschildInitCond>(body); }},
+			{"stellar_kerr_newman", [&](){ return std::make_shared<StellarKerrNewmanInitCond>(body); }},
 	
-#if 1
-			{"rotating_EM_field", [&](Vector<int,subDim> index){
-				MetricPrims& metricPrims = metricPrimGrid(index);
-				const Vector<real,subDim>& xi = xs(index);
-				
-				real x = xi(0);
-				real y = xi(1);
-				real z = xi(2);
-			
-				//define EM field here
-				//...and its first derivative
-			}},
-#endif
+			{"rotating_EM_field", [&](){ return std::make_shared<RotatingEMFieldInitCond>(); }},
 		}, *p;
 
-		std::function<void(Vector<int,subDim>)> initCond;
+		std::shared_ptr<InitCond> initCond;
 		for (p = initConds; p < endof(initConds); ++p) {
 			if (p->name == initCondName) {
-				initCond = p->func;
+				initCond = p->func();
 				break;
 			}
 		}
@@ -1533,10 +1641,7 @@ int main(int argc, char** argv) {
 
 		//initialize metric primitives
 		time("calculating metric primitives", [&]{
-			RangeObj<subDim> range(Vector<int,subDim>(), sizev);
-			parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
-				initCond(index);
-			});
+			initCond->initMetricPrims(metricPrimGrid, xs);
 		});
 	}
 
@@ -1623,9 +1728,9 @@ int main(int argc, char** argv) {
 			Vector<real, subDim> xi = xs(index);
 			real r = Vector<real, subDim>::length(xi);
 			//substitute the schwarzschild R for 2 m(r)
-			real matterRadius = std::min<real>(r, radius);
+			real matterRadius = std::min<real>(r, body->radius);
 			real volumeOfMatterRadius = 4./3.*M_PI*matterRadius*matterRadius*matterRadius;
-			real m = density * volumeOfMatterRadius;	// m^3
+			real m = body->density * volumeOfMatterRadius;	// m^3
 
 			//now that I'm using the correct alpha equation, my dm/dr term is causing the analytical gravity calculation to be off ...
 			//real dm_dr = r > radius ? 0 : density * 4 * M_PI * matterRadius * matterRadius;
@@ -1745,6 +1850,7 @@ int main(int argc, char** argv) {
 		}
 	}
 
+#if 0
 	{
 		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
 		
@@ -1774,6 +1880,7 @@ int main(int argc, char** argv) {
 					<< EFE_tt_distr[i] << std::endl;
 		}
 	}
+#endif
 
 	std::cout << "done!" << std::endl;
 }

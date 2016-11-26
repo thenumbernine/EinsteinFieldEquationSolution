@@ -28,6 +28,7 @@ int main() {
 			Grid<real,dim> result; result.v=result_; result.size=size;	
 			Grid<const real,dim> phi; phi.v=phi_; phi.size=size;
 			parallel.foreach(phi.range().begin(), phi.range().end(), [&](const Vector<int,dim>& index) {
+				//build the source
 				if (index(0) == 0 || index(0) == size(0)-1 ||
 					index(1) == 0 || index(1) == size(1)-1 ||
 					index(2) == 0 || index(2) == size(2)-1)

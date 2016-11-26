@@ -5,9 +5,15 @@
 -- ... I think fixing that last one will help the results converge.
 maxiter = 0
 
+-- this holds things like radius of the grid and stress-energy prim information 
+body = 'earth'
+--body = 'sun'
+--body = 'empty'
+
 --initCond = 'flat'
 initCond = 'stellar_schwarzschild'
 --initCond = 'stellar_kerr_newman'
+--initCond = 'rotating_EM_field'
 
 --solver = 'conjgrad'
 --solver = 'conjres'
@@ -16,7 +22,7 @@ solver = 'jfnk'
 
 size = 64
 
--- how big to construct the grid
+-- how much bigger is our grid than our spherical body 
 bodyRadii = 2
 
 outputFilename = 'out.txt'

@@ -59,3 +59,22 @@ Note that Kerr without rotation exhibits less gravitational acceleration than Ke
 ![alt text](images/kerr fast rotation vs. kerr rotation.png)
 
 Kerr metric increase in acceleration due to faster rotation.
+
+
+
+---
+
+Some thoughts on results ...
+
+Here are the variable ranges, initializing the stress-energy prims with the earth, intiializing the metric prims with a flat metric:
+
+after 0 iterations:
+#	ix	iy	iz	rho	det-1	alpha-1	gravity	analyticalGravity	EFE_tt(g/cm^3)	EFE_ti	EFE_ij	G_ab
+min	0	0	0	0	0	0	0	0.8721489818523	-5.5147098661213	0	0	0
+max	31	31	31	4.0950296770075e-24	0	0	0	9.7255065992554	0	0	0	0
+
+after 1 iterations of gmres solver (I had to make it 32^3):
+#	ix	iy	iz	rho	det-1	alpha-1	gravity	analyticalGravity	EFE_tt(g/cm^3)	EFE_ti	EFE_ij	G_ab
+min	0	0	0	0	0	0	0	0.8721489818523	-5.5147098661213	0	0	0
+max	31	31	31	4.0950296770075e-24	0	0	0	9.7255065992554	0	0	0	0
+

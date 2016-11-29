@@ -102,10 +102,18 @@ struct gridFromPtr {
 	gridFromPtr(real* ptr, Vector<int, subDim> size) {
 		grid.v = (T*)ptr;
 		grid.size = size;
+		grid.step(0) = 1;
+		for (int i = 1; i < subDim; ++i) {
+			grid.step(i) = grid.step(i-1) * grid.size(i-1);
+		}
 	}
 	gridFromPtr(const real* ptr, Vector<int, subDim> size) {
 		grid.v = (T*)ptr;
 		grid.size = size;
+		grid.step(0) = 1;
+		for (int i = 1; i < subDim; ++i) {
+			grid.step(i) = grid.step(i-1) * grid.size(i-1);
+		}
 	}
 	~gridFromPtr() {
 		grid.v = NULL;	//don't deallocate
@@ -178,6 +186,13 @@ struct StressEnergyPrims {
 	3) F_uv = A_v;u - A_u;v
 	4) T_uv = 1/(4 pi)(F_u^a F_va - 1/4 g_uv F^ab F_ab)
 	*/
+
+	StressEnergyPrims()
+	: rho(0), P(0), eInt(0)	//technically these should all be positive...
+#ifdef USE_CHARGE_CURRENT_FOR_EM
+	,chargeDensity(0)
+#endif	
+	{}
 };
 
 /*
@@ -525,8 +540,25 @@ assert(GammaSqULLL(a,b,c,d) == GammaSqULLL(a,b,c,d));
 		}
 	}
 
-	//technically the last two are antisymmetric ... but I don't think I have that working yet ... 
-	//...and if I stored RiemannLLLL then the first two would be antisymmetric as well, and the pairs of the first two and second two would be symmetric
+	/*
+	technically the last two are antisymmetric ... but I don't think I have that working yet ... 
+	...and if I stored RiemannLLLL then the first two would be antisymmetric as well, and the pairs of the first two and second two would be symmetric
+
+	Symmetry goes away with torsion
+
+	Gamma^a_bc e_a = e_b;c
+
+	Torsion = T^a_bc = Gamma^a_bc - Gamma^a_cb
+	...so order of Gamma matters
+	...so what is the covariant derivative?
+	is it v^a_;b = v^a_,b + Gamma^a_cb v^c ?	<- I'm using this so the derivative index is last
+	or v^a_;b = v^a_,b + Gamma^a_bc v^c ?
+	
+	v^a_;bc - v^a_;cb = Riemann^a_bcd v^d
+	(v^a_,b + Gamma^a_db v^d);c - (v^a_,c + Gamma^a_dc v^d);b
+	v^a_,bc + 
+
+	*/
 	TensorULLL RiemannULLL;
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b < dim; ++b) {
@@ -638,12 +670,16 @@ TensorSL calc_8piTLL(
 				+ Gamma^a_bu (A^b_,v + Gamma^b_wv A^w) g^uv
 				- Gamma^u_bu (A^a_,v + Gamma^a_wv A^w) g^bv
 	((A^a_,b + Gamma^a_cb A^c) + R^a_b A^b) / (4 pi) = J^a
+	
+	but then we have to run the JFNK to find A across all the grid, so we can use spatial derivatives
+	...and what about time derivatives?  assume steady state, or provide the time derivative 
 	*/
 	JFNK(dim,
+		dim, 
 		JU.v,
 		[&](double* y, const double* x) {
 			for (int a = 0; i < dim; ++a) {
-				
+				y[0] = 
 			}
 		}
 	);
@@ -868,7 +904,7 @@ for (int i = 0; i < (int)getN(); ++i) {
 #endif				
 			calc_gLLs_and_gUUs(
 				//input
-				gridFromPtr<MetricPrims>(x, sizev).grid,
+				Grid<MetricPrims, subDim>(sizev, (MetricPrims*)x),
 				dt_metricPrimGrid,	//first deriv
 				//output
 				gLLs, gUUs, dt_gLLs);
@@ -881,12 +917,12 @@ for (int i = 0; i < (int)getN(); ++i) {
 		});
 		time("calculating G_ab", [&]{
 #endif
-			gridFromPtr<TensorSL> gy(y, sizev);
+			Grid<TensorSL, subDim> gy(sizev, (TensorSL*)y);
 			calc_EinsteinLLs(
 				//input
 				gLLs, gUUs, GammaULLs,
 				//output
-				gy.grid);
+				gy);
 //debugging
 for (int i = 0; i < (int)getN(); ++i) {
 	assert(y[i] == y[i]);
@@ -904,7 +940,7 @@ for (int i = 0; i < (int)getN(); ++i) {
 #ifdef PRINTTIME
 		time("calculating T_ab", [&]{
 #endif				
-			calc_8piTLLs(gridFromPtr<MetricPrims>(x).grid, stressEnergyPrimGrid, _8piTLLs);
+			calc_8piTLLs(Grid<const MetricPrims, subDim>(sizev, (const MetricPrims*)x), stressEnergyPrimGrid, _8piTLLs);
 #ifdef PRINTTIME
 		});
 #endif
@@ -1053,16 +1089,19 @@ struct GMResSolver : public KrylovSolver {
 			(const real*)_8piTLLs.v,		//b = solution vector
 			[&](real* y, const real* x) { linearFunc(y, x, dt_metricPrimGrid); },	//A = linear function to solve x for A(x) = b
 			1e-30,			//epsilon
-			getN(),			//maxiter
+			getN(),			//maxiter ... = n^3 ... 262144
 			100				//restart
 		);
+		//the largest allocation is restart * maxiter, which would be 100 * n^3, 
+		// for a 64^3 grid is 2,621,440,000
+		// for a 32^3 grid is 327,680,000
 	}
 };
 
 struct JFNK : public Solvers::JFNK<real> {
 	using Solvers::JFNK<real>::JFNK;
 	virtual real calcResidual(const real* r, real alpha) const {
-
+#if 1
 		//residual is only used to compare whether somethig is better or worse than somethign else, so scale it up
 		real sum = 0;
 		for (int i = 0; i < (int)n; ++i) {
@@ -1076,7 +1115,7 @@ struct JFNK : public Solvers::JFNK<real> {
 			<< " alpha=" << alpha
 			<< " residual=" << residual 
 			<< std::endl;
-		
+#endif	
 		return residual;
 	}
 };
@@ -1112,7 +1151,7 @@ struct JFNKSolver : public EFESolver {
 #endif				
 				calc_gLLs_and_gUUs(
 					//input:
-					gridFromPtr<MetricPrims>(x, sizev).grid,
+					Grid<MetricPrims, subDim>(sizev, (MetricPrims*)x),
 					dt_metricPrimGrid,	//first deriv
 					//output:
 					gLLs, gUUs, dt_gLLs);
@@ -1125,11 +1164,11 @@ struct JFNKSolver : public EFESolver {
 				});
 				time("calculating G_ab = 8 pi T_ab", [&]{
 #endif
-				gridFromPtr<TensorSL> gy(y, sizev);
+				Grid<TensorSL, subDim> gy(sizev, (TensorSL*)y);
 				calc_EFE_constraint(
-					gridFromPtr<MetricPrims>(x, sizev).grid,
+					Grid<MetricPrims, subDim>(sizev, (MetricPrims*)x),
 					stressEnergyPrimGrid,
-					gy.grid);
+					gy);
 #ifdef PRINTTIME
 				});
 #endif
@@ -1160,7 +1199,7 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 	}
 
 	std::cout << " 8piT_ab=";
-	TensorSL _8piT_LL = calc_8piTLL(gridFromPtr<MetricPrims>(x,sizev).grid(index), gLLs(index), stressEnergyPrimGrid(index));
+	TensorSL _8piT_LL = calc_8piTLL(Grid<MetricPrims, subDim>(sizev, (const MetricPrims*)x)(index), gLLs(index), stressEnergyPrimGrid(index));
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b <= a; ++b) {
 			std::cout << " " << _8piT_LL(a,b);
@@ -1171,41 +1210,42 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 });
 #endif	//debug output
 			},
-			1e-100, 				//newton stop epsilon
+			1e-7, 				//newton stop epsilon
 			maxiter, 			//newton max iter
 			[&](size_t n, real* x, real* b, JFNK::Func A) -> std::shared_ptr<Solvers::Krylov<real>> {
 				return std::make_shared<GMRes>(
 					n, x, b, A,
-					1e-20, 				//gmres stop epsilon
-#if 0	// this is ideal, but impractical with 32^3 data
-					getN() * 10, 		//gmres max iter
-					getN()				//gmres restart iter
-#endif
-#if 1	//so I'm doing this instead:
-					4 * getN(),				//gmres max maxiter
-					4 * getN()				//gmres restart iter
-#endif
+					1e-40, 				//gmres stop epsilon
+					n * 10, 			//gmres max iter
+					100					//gmres restart iter
 				);
 			}
 		);
 		jfnk.jacobianEpsilon = 1e-6;
 		jfnk.maxAlpha = 1;
-		jfnk.lineSearch = &JFNK::lineSearch_linear;
 		//jfnk.lineSearch = &JFNK::lineSearch_none;
+		jfnk.lineSearch = &JFNK::lineSearch_bisect;
+		jfnk.lineSearchMaxIter = 20;
 		jfnk.stopCallback = [&]()->bool{
 			std::cout << "jfnk iter=" << jfnk.getIter() << " alpha=" << jfnk.getAlpha() << " residual=" << jfnk.getResidual() << std::endl;
 			return false;
 		};
-		jfnk.getLinearSolver()->stopCallback = [&]()->bool{
+		std::shared_ptr<GMRes> gmres = std::dynamic_pointer_cast<GMRes>(jfnk.getLinearSolver());
+		gmres->stopCallback = [&]()->bool{
 			//the residual is staying constant ... at 16 even, for a 4*4*4 grid ...
-			std::cout << "gmres iter=" << jfnk.getLinearSolver()->getIter() << " residual=" << jfnk.getLinearSolver()->getResidual() << std::endl;
+			std::cout << "gmres"
+				<< " iter=" << gmres->getIter() 
+				<< " residual=" << gmres->getResidual() 
+				<< std::endl;
 			return false;
 		};
+		/*
 		jfnk.getLinearSolver()->MInv = [&](real* y, const real* x) {
 			for (int i = 0; i < (int)getN(); ++i) {
 				y[i] = x[i] / (8. * M_PI) * c * c / G / 1000.;
 			}
 		};
+		*/
 
 		time("solving", [&](){
 			jfnk.solve();
@@ -1213,13 +1253,24 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 	}
 };
 
-struct SphericalBody {
-	real radius, mass;
+struct Body {
+	real radius;
+
+	Body(real radius_) : radius(radius_) {}
+
+	virtual void initStressEnergyPrim(
+		Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
+		const Grid<Vector<real, subDim>, subDim>& xs
+	) = 0;
+};
+
+struct SphericalBody : public Body {
+	real mass;
 	//derived:
 	real volume, density;
 	
 	SphericalBody(real radius_, real mass_)
-	: radius(radius_),
+	: Body(radius_),
 	mass(mass_),
 	volume(4./3.*M_PI*radius*radius*radius),	// m^3
 	density(mass / volume)	// 1/m^2
@@ -1240,7 +1291,64 @@ struct SphericalBody {
 				stressEnergyPrims.v(i) = 0;	//3-velocity
 				stressEnergyPrims.E(i) = 0;	//electric field
 				stressEnergyPrims.B(i) = 0;	//magnetic field
-			}	
+			}
+		});
+	}
+};
+
+//E_i = A_t,i - A_i,t
+//B_i = epsilon_i^jk A_k,j
+struct EMFieldBody : public Body {
+	//torus-shaped-something
+	//radius is the big radius of the torus
+	EMFieldBody(real radius_)
+	: Body(radius_)
+	{}
+
+	virtual void initStressEnergyPrim(
+		Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
+		const Grid<Vector<real, subDim>, subDim>& xs
+	) {
+		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
+			StressEnergyPrims &stressEnergyPrims = stressEnergyPrimGrid(index);
+			const Vector<real, subDim>& xi = xs(index);
+			real x = xi(0);
+			real y = xi(1);
+			real z = xi(2);
+			real polar_rSq = x*x + y*y; 
+			real polar_r = sqrt(polar_rSq);		//r in polar coordinates	
+			real dr = polar_r - radius;	//difference from polar radius to torus big radius
+			real r = sqrt(z*z + dr*dr);			//r in torus radial coordinates
+			real theta = atan2(z, dr);			//angle around the small radius
+			real phi = atan2(x, y);				//angle around the big radius
+		
+			//F^uv_;v = -4 pi J^u
+			// means that the divergence of the EM is the 4-current 
+			//the divergence of the exterior of the 4-potential is the 4-current
+			//so if the 4-current is a Dirac delta function along the line in space where there is current
+			// then the EM tensor is going to be an inverse falloff around it
+	
+			//4-current
+			//t is current density
+			//i is charge density = current density * drift velocity
+			//stressEnergyPrims.chargeDensity
+			//stressEnergyPrims.A
+	
+			/*
+			point on the surface:
+				r * cos(phi) * cos(theta)
+				r * sin(phi) * cos(theta)
+				r * sin(theta)
+			*/
+		
+			stressEnergyPrims.E(0) = -y / polar_rSq;
+			stressEnergyPrims.E(1) = x / polar_rSq;
+			stressEnergyPrims.E(2) = 0;
+	
+			stressEnergyPrims.B(0) = cos(theta) / r * cos(phi);
+			stressEnergyPrims.B(1) = cos(theta) / r * sin(phi);
+			stressEnergyPrims.B(2) = -sin(theta) / r;
 		});
 	}
 };
@@ -1470,27 +1578,10 @@ struct StellarKerrNewmanInitCond : public SphericalBodyInitCond {
 	}
 };
 
-struct RotatingEMFieldInitCond : public InitCond {
-	virtual void initMetricPrims(
-		Grid<MetricPrims, subDim>& metricPrimGrid,
-		const Grid<Vector<real, subDim>, subDim>& xs
-	) {
-		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
-		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
-			MetricPrims& metricPrims = metricPrimGrid(index);
-			const Vector<real,subDim>& xi = xs(index);
-			
-			real x = xi(0);
-			real y = xi(1);
-			real z = xi(2);
-		
-			//define EM field here
-			//...and its first derivative
-		
-			//E_i = A_t,i - A_i,t
-			//B_i = epsilon_i^jk A_k,j
-		});
-	}
+struct EMFieldInitCond : public FlatInitCond {
+	std::shared_ptr<EMFieldBody> body;	
+	EMFieldInitCond(std::shared_ptr<EMFieldBody> body_) : body(body_) {}
+	//use flat initial metric prims for now
 };
 
 int main(int argc, char** argv) {	
@@ -1528,11 +1619,11 @@ int main(int argc, char** argv) {
 	std::cout << "bodyRadii=" << bodyRadii << std::endl;
 
 
-	std::shared_ptr<SphericalBody> body;
+	std::shared_ptr<Body> body;
 	{
 		struct {
 			const char* name;
-			std::function<std::shared_ptr<SphericalBody>()> func;
+			std::function<std::shared_ptr<Body>()> func;
 		} bodies[] = {
 			{"earth", [&](){
 				const real earthRadius = 6.37101e+6;	// m
@@ -1550,6 +1641,10 @@ int main(int argc, char** argv) {
 				const real sunRadius = 6.960e+8;	// m
 				const real sunMass = 1.9891e+30 * G / c / c;	// m
 				return std::make_shared<SphericalBody>(sunRadius, sunMass);
+			}},
+		
+			{"em_field", [&](){
+				return std::make_shared<EMFieldBody>(2);
 			}},
 		}, *p;
 	
@@ -1620,12 +1715,21 @@ int main(int argc, char** argv) {
 			std::function<std::shared_ptr<InitCond>()> func;
 		} initConds[] = {
 			{"flat", [&](){ return std::make_shared<FlatInitCond>(); }},
-		
-			// depend on body:
-			{"stellar_schwarzschild", [&](){ return std::make_shared<StellarSchwarzschildInitCond>(body); }},
-			{"stellar_kerr_newman", [&](){ return std::make_shared<StellarKerrNewmanInitCond>(body); }},
-	
-			{"rotating_EM_field", [&](){ return std::make_shared<RotatingEMFieldInitCond>(); }},
+			{"stellar_schwarzschild", [&](){ 
+				std::shared_ptr<SphericalBody> sphericalBody = std::dynamic_pointer_cast<SphericalBody>(body);
+				assert(sphericalBody);
+				return std::make_shared<StellarSchwarzschildInitCond>(sphericalBody);
+			}},
+			{"stellar_kerr_newman", [&](){ 
+				std::shared_ptr<SphericalBody> sphericalBody = std::dynamic_pointer_cast<SphericalBody>(body);
+				assert(sphericalBody);
+				return std::make_shared<StellarKerrNewmanInitCond>(sphericalBody);
+			}},
+			{"em_field", [&](){ 
+				std::shared_ptr<EMFieldBody> emFieldBody = std::dynamic_pointer_cast<EMFieldBody>(body);
+				assert(emFieldBody);
+				return std::make_shared<EMFieldInitCond>(emFieldBody);
+			}},
 		}, *p;
 
 		std::shared_ptr<InitCond> initCond;
@@ -1722,27 +1826,30 @@ int main(int argc, char** argv) {
 	});
 
 	Grid<real, subDim> analyticalGravity(sizev);
-	time("calculating analytical gravitational force", [&]{
-		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
-		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
-			Vector<real, subDim> xi = xs(index);
-			real r = Vector<real, subDim>::length(xi);
-			//substitute the schwarzschild R for 2 m(r)
-			real matterRadius = std::min<real>(r, body->radius);
-			real volumeOfMatterRadius = 4./3.*M_PI*matterRadius*matterRadius*matterRadius;
-			real m = body->density * volumeOfMatterRadius;	// m^3
+	std::shared_ptr<SphericalBody> sphericalBody = std::dynamic_pointer_cast<SphericalBody>(body);
+	if (sphericalBody) {
+		time("calculating analytical gravitational force", [&]{
+			RangeObj<subDim> range(Vector<int,subDim>(), sizev);
+			parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
+				Vector<real, subDim> xi = xs(index);
+				real r = Vector<real, subDim>::length(xi);
+				//substitute the schwarzschild R for 2 m(r)
+				real matterRadius = std::min<real>(r, sphericalBody->radius);
+				real volumeOfMatterRadius = 4./3.*M_PI*matterRadius*matterRadius*matterRadius;
+				real m = sphericalBody->density * volumeOfMatterRadius;	// m^3
 
-			//now that I'm using the correct alpha equation, my dm/dr term is causing the analytical gravity calculation to be off ...
-			//real dm_dr = r > radius ? 0 : density * 4 * M_PI * matterRadius * matterRadius;
-			// ... maybe it shouldn't be there to begin with?
-			real dm_dr = 0;
-			real GammaUr_tt = (2*m * (r - 2*m) + 2 * dm_dr * r * (2*m - r)) / (2 * r * r * r)
-				* c * c;	//+9 at earth surface, without matter derivatives
+				//now that I'm using the correct alpha equation, my dm/dr term is causing the analytical gravity calculation to be off ...
+				//real dm_dr = r > radius ? 0 : density * 4 * M_PI * matterRadius * matterRadius;
+				// ... maybe it shouldn't be there to begin with?
+				real dm_dr = 0;
+				real GammaUr_tt = (2*m * (r - 2*m) + 2 * dm_dr * r * (2*m - r)) / (2 * r * r * r)
+					* c * c;	//+9 at earth surface, without matter derivatives
 
-			//acceleration is -Gamma^r_tt along the radial direction (i.e. upwards from the surface), or Gamma^r_tt downward into the surface
-			analyticalGravity(index) = GammaUr_tt;
+				//acceleration is -Gamma^r_tt along the radial direction (i.e. upwards from the surface), or Gamma^r_tt downward into the surface
+				analyticalGravity(index) = GammaUr_tt;
+			});
 		});
-	});
+	}
 
 	{
 		struct Col {
@@ -1775,7 +1882,11 @@ int main(int argc, char** argv) {
 #endif
 #if 1		// numerical gravity is double what analytical gravity is ... and flips to negative as it passes the planet surface ...
 			{"gravity", [&](Vector<int,subDim> index)->real{ return numericalGravity(index); }},
-			{"analyticalGravity", [&](Vector<int,subDim> index)->real{ return analyticalGravity(index); }},
+		};
+		if (sphericalBody) {
+			cols.push_back({"analyticalGravity", [&](Vector<int,subDim> index)->real{ return analyticalGravity(index); }});
+		}
+		std::vector<Col> moreCols = {
 #endif
 			{"EFE_tt(g/cm^3)", [&](Vector<int,subDim> index)->real{
 				return EFEGrid(index)(0,0) / (8. * M_PI) * c * c / G / 1000.;	// g/cm^3 ... so in absense of any curvature, the constraint error will now match the density
@@ -1816,6 +1927,7 @@ int main(int argc, char** argv) {
 			}},
 #endif
 		};
+		cols.insert(cols.end(), moreCols.begin(), moreCols.end());
 
 		if (!lua["outputFilename"].isNil()) {
 			std::string outputFilename;

@@ -19,7 +19,10 @@ might get into trouble ensuring the hamiltonian or momentum constraints are fulf
 #include <functional>
 #include <chrono>
 
-Parallel::Parallel parallel(8);
+const int numThreads = 8;
+Parallel::Parallel parallel(numThreads);
+
+const int partialDerivativeOrder = 2;//options are 2, 4, 6, 8
 
 void time(const std::string name, std::function<void()> f) {
 	std::cout << name << " ... ";
@@ -153,8 +156,11 @@ struct StressEnergyPrims {
 	real rho;	//matter density
 	real P;		//pressure ... due to matter.  TODO what about magnetic pressure?
 	real eInt;	//specific internal energy
+
+	bool useV;
 	TensorUsub v;	//3-vel (upper, spatial)
 
+	bool useEM;
 #ifdef USE_CHARGE_CURRENT_FOR_EM
 	/*
 	one way to reconstruct the E & B fields is by representing the charge and current densities	
@@ -411,7 +417,7 @@ void calc_GammaULLs(
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
 		//derivatives of the metric in spatial coordinates using finite difference
 		//the templated method (1) stores derivative first and (2) only stores spatial
-		TensorLsubSL dgLLL3 = partialDerivative<8, real, subDim, TensorSL>(
+		TensorLsubSL dgLLL3 = partialDerivative<partialDerivativeOrder, real, subDim, TensorSL>(
 			index, dx,
 			[&](Vector<int, subDim> index)
 				-> TensorSL
@@ -478,7 +484,7 @@ TensorSL calc_EinsteinLL(
 	const Grid<TensorUSL, subDim>& GammaULLs
 ) {
 	//connection derivative
-	TensorLsubUSL dGammaLULL3 = partialDerivative<8, real, subDim, TensorUSL>(
+	TensorLsubUSL dGammaLULL3 = partialDerivative<partialDerivativeOrder, real, subDim, TensorUSL>(
 		index, dx, [&](Vector<int, subDim> index) -> TensorUSL {
 			for (int i = 0; i < subDim; ++i) {
 				index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
@@ -540,6 +546,7 @@ assert(GammaSqULLL(a,b,c,d) == GammaSqULLL(a,b,c,d));
 		}
 	}
 
+#if 0	//calculate the Riemann, then the Ricci
 	/*
 	technically the last two are antisymmetric ... but I don't think I have that working yet ... 
 	...and if I stored RiemannLLLL then the first two would be antisymmetric as well, and the pairs of the first two and second two would be symmetric
@@ -584,6 +591,33 @@ assert(RiemannULLL(a,b,c,d) == RiemannULLL(a,b,c,d));
 assert(RicciLL(a,b) == RicciLL(a,b));
 		}
 	}
+#else	//just calculate the Ricci
+	TensorL Gamma12L;
+	for (int a = 0; a < dim; ++a) {
+		real sum = 0;
+		for (int b = 0; b < dim; ++b) {
+			sum += GammaULL(b,b,a);
+		}
+		Gamma12L(a) = sum;
+	}
+	
+	//R_ab = Gamma^c_ab,c - Gamma^c_ac,b + Gamma^d_ab Gamma^c_cd - Gamma^d_ac Gamma^c_bd
+	TensorSL RicciLL;
+	for (int a = 0; a < dim; ++a) {
+		for (int b = 0; b < dim; ++b) {
+			real sum = 0;
+			for (int c = 0; c < dim; ++c) {
+				sum += dGammaULLL(c,a,b,c) - dGammaULLL(c,a,c,b) + GammaULL(c,a,b) * Gamma12L(c);
+				for (int d = 0; d < dim; ++d) {
+					sum -= GammaULL(d,a,c) * GammaULL(c,b,d);
+				}
+			}
+			RicciLL(a,b) = sum;
+//debugggin
+assert(RicciLL(a,b) == RicciLL(a,b));
+		}
+	}
+#endif
 	
 	const TensorSU &gUU = gUUs(index);
 	real Gaussian = 0;
@@ -655,110 +689,118 @@ TensorSL calc_8piTLL(
 	const TensorSLsub &gammaLL = metricPrims.gammaLL;
 
 	//electromagnetic stress-energy
+	TensorSL T_EM_LL;
+	if (stressEnergyPrims.useEM) {
 
 #ifdef USE_CHARGE_CURRENT_FOR_EM
-	TensorU JU;
-	JU(0) = stressEnergyPrims.chargeDensity;
-	for (int i = 0; i < subDim; ++i) {
-		JU(i+1) = stressEnergyPrims.currentDensity(i);
-	}
-	TensorU AU = JU;
-	/*
-	A^a;u = A^a_;v g^uv = (A^a_,v + Gamma^a_wv A^w) g^uv
-	A^a;u_;u = A^a;u_,u + Gamma^a_bu A^b;u + Gamma^u_bu A^a;b
-			= (A^a_;v g^uv = (A^a_,v + Gamma^a_wv A^w) g^uv)_,u
-				+ Gamma^a_bu (A^b_,v + Gamma^b_wv A^w) g^uv
-				- Gamma^u_bu (A^a_,v + Gamma^a_wv A^w) g^bv
-	((A^a_,b + Gamma^a_cb A^c) + R^a_b A^b) / (4 pi) = J^a
-	
-	but then we have to run the JFNK to find A across all the grid, so we can use spatial derivatives
-	...and what about time derivatives?  assume steady state, or provide the time derivative 
-	*/
-	JFNK(dim,
-		dim, 
-		JU.v,
-		[&](double* y, const double* x) {
-			for (int a = 0; i < dim; ++a) {
-				y[0] = 
-			}
+		TensorU JU;
+		JU(0) = stressEnergyPrims.chargeDensity;
+		for (int i = 0; i < subDim; ++i) {
+			JU(i+1) = stressEnergyPrims.currentDensity(i);
 		}
-	);
+		TensorU AU = JU;
+		/*
+		A^a;u = A^a_;v g^uv = (A^a_,v + Gamma^a_wv A^w) g^uv
+		A^a;u_;u = A^a;u_,u + Gamma^a_bu A^b;u + Gamma^u_bu A^a;b
+				= (A^a_;v g^uv = (A^a_,v + Gamma^a_wv A^w) g^uv)_,u
+					+ Gamma^a_bu (A^b_,v + Gamma^b_wv A^w) g^uv
+					- Gamma^u_bu (A^a_,v + Gamma^a_wv A^w) g^bv
+		((A^a_,b + Gamma^a_cb A^c) + R^a_b A^b) / (4 pi) = J^a
+		
+		but then we have to run the JFNK to find A across all the grid, so we can use spatial derivatives
+		...and what about time derivatives?  assume steady state, or provide the time derivative 
+		*/
+		JFNK(dim,
+			dim, 
+			JU.v,
+			[&](double* y, const double* x) {
+				for (int a = 0; i < dim; ++a) {
+					y[0] = 
+				}
+			}
+		);
 #else	//USE_CHARGE_CURRENT_FOR_EM
-	TensorUsub E = stressEnergyPrims.E;
-	TensorUsub B = stressEnergyPrims.B;
+		TensorUsub E = stressEnergyPrims.E;
+		TensorUsub B = stressEnergyPrims.B;
 #endif
 
-	//electromagnetic stress-energy
-	real ESq = 0, BSq = 0;
-	for (int i = 0; i < subDim; ++i) {
-		for (int j = 0; j < subDim; ++j) {
-			ESq += E(i) * E(j) * gammaLL(i,j);
-			BSq += B(i) * B(j) * gammaLL(i,j);
-		}
-	}
-	TensorUsub S = cross<real>(E, B);
-	
-	TensorSL T_EM_UU;
-	T_EM_UU(0,0) = (ESq + BSq) / alphaSq / (8 * M_PI);
-	for (int i = 0; i < subDim; ++i) {
-		T_EM_UU(i+1,0) = (-betaU(i) * (ESq + BSq) / alphaSq + 2 * S(i) / alpha) / (8 * M_PI);
-		for (int j = 0; j <= i; ++j) {
-			T_EM_UU(i+1,j+1) = -2 * (E(i) * E(j) + B(i) * B(j) + (S(i) * B(j) + S(j) * B(i)) / alpha) + betaU(i) * betaU(j) * (ESq + BSq) / alphaSq;
-			if (i == j) {
-				T_EM_UU(i+1,j+1) += ESq + BSq;
+		//electromagnetic stress-energy
+		real ESq = 0, BSq = 0;
+		for (int i = 0; i < subDim; ++i) {
+			for (int j = 0; j < subDim; ++j) {
+				ESq += E(i) * E(j) * gammaLL(i,j);
+				BSq += B(i) * B(j) * gammaLL(i,j);
 			}
-			T_EM_UU(i+1,j+1) /= 8 * M_PI;
 		}
-	}
+		TensorUsub S = cross<real>(E, B);
+		
+		TensorSL T_EM_UU;
+		T_EM_UU(0,0) = (ESq + BSq) / alphaSq / (8 * M_PI);
+		for (int i = 0; i < subDim; ++i) {
+			T_EM_UU(i+1,0) = (-betaU(i) * (ESq + BSq) / alphaSq + 2 * S(i) / alpha) / (8 * M_PI);
+			for (int j = 0; j <= i; ++j) {
+				T_EM_UU(i+1,j+1) = -2 * (E(i) * E(j) + B(i) * B(j) + (S(i) * B(j) + S(j) * B(i)) / alpha) + betaU(i) * betaU(j) * (ESq + BSq) / alphaSq;
+				if (i == j) {
+					T_EM_UU(i+1,j+1) += ESq + BSq;
+				}
+				T_EM_UU(i+1,j+1) /= 8 * M_PI;
+			}
+		}
 
-	TensorUL T_EM_LU;
-	for (int a = 0; a < dim; ++a) {
-		for (int b = 0; b < dim; ++b) {
-			real sum = 0;
-			for (int w = 0; w < dim; ++w) {
-				sum += gLL(a,w) * T_EM_UU(w,b);
+		TensorUL T_EM_LU;
+		for (int a = 0; a < dim; ++a) {
+			for (int b = 0; b < dim; ++b) {
+				real sum = 0;
+				for (int w = 0; w < dim; ++w) {
+					sum += gLL(a,w) * T_EM_UU(w,b);
+				}
+				T_EM_LU(a,b) = sum;
 			}
-			T_EM_LU(a,b) = sum;
 		}
-	}
 
-	TensorSL T_EM_LL;
-	for (int a = 0; a < dim; ++a) {
-		for (int b = 0; b <= a; ++b) {
-			real sum = 0;
-			for (int w = 0; w < dim; ++w) {
-				sum += T_EM_LU(a,w) * gLL(w,b);
+		for (int a = 0; a < dim; ++a) {
+			for (int b = 0; b <= a; ++b) {
+				real sum = 0;
+				for (int w = 0; w < dim; ++w) {
+					sum += T_EM_LU(a,w) * gLL(w,b);
+				}
+				T_EM_LL(a,b) = sum;
 			}
-			T_EM_LL(a,b) = sum;
 		}
 	}
 
 	//matter stress-energy
 
-	const TensorUsub &v = stressEnergyPrims.v;
-
-	//Lorentz factor
-	real vLenSq = 0;
-	for (int i = 0; i < subDim; ++i) {
-		for (int j = 0; j < subDim; ++j) {
-			vLenSq += v(i) * v(j) * gammaLL(i,j);
-		}
-	}
-	real W = 1 / sqrt( 1 - sqrt(vLenSq) );
-
-	//4-vel upper
-	TensorU uU;
-	uU(0) = W;
-	for (int i = 0; i < subDim; ++i) {
-		uU(i+1) = W * v(i);
-	}
-
-	//4-vel lower
 	TensorL uL;
-	for (int a = 0; a < dim; ++a) {
-		uL(a) = 0;
-		for (int b = 0; b < dim; ++b) {
-			uL(a) += uU(b) * gLL(b,a);
+	if (stressEnergyPrims.useV) {
+		const TensorUsub &v = stressEnergyPrims.v;
+
+		//Lorentz factor
+		real vLenSq = 0;
+		for (int i = 0; i < subDim; ++i) {
+			for (int j = 0; j < subDim; ++j) {
+				vLenSq += v(i) * v(j) * gammaLL(i,j);
+			}
+		}
+		real W = 1 / sqrt( 1 - sqrt(vLenSq) );
+
+		//4-vel upper
+		TensorU uU;
+		uU(0) = W;
+		for (int i = 0; i < subDim; ++i) {
+			uU(i+1) = W * v(i);
+		}
+
+		//4-vel lower
+		for (int a = 0; a < dim; ++a) {
+			uL(a) = 0;
+			for (int b = 0; b < dim; ++b) {
+				uL(a) += uU(b) * gLL(b,a);
+			}
+		}
+	} else {
+		for (int a = 0; a < dim; ++a) {
+			uL(a) = gLL(a,0);
 		}
 	}
 
@@ -780,7 +822,7 @@ TensorSL calc_8piTLL(
 			T_matter_LL(a,b) = uL(a) * uL(b) * (stressEnergyPrims.rho * (1 + stressEnergyPrims.eInt) + stressEnergyPrims.P) + gLL(a,b) * stressEnergyPrims.P;
 		}
 	}
-	
+
 	//total stress-energy	
 	TensorSL _8piT_LL;
 	for (int a = 0; a < dim; ++a) {
@@ -846,6 +888,8 @@ struct EFESolver {
 	) = 0;
 };
 
+//#define CONVERGE_ALPHA_ONLY
+
 /*
 use a linear solver and treat G_ab = 8 pi T_ab like a linear system A x = b for x = (alpha, beta, gamma), A x = G_ab(x), and b = 8 pi T_ab ... which is also a function of x ...
 nothing appears to be moving ...
@@ -902,9 +946,10 @@ for (int i = 0; i < (int)getN(); ++i) {
 		std::cout << "iteration " << jfnk.iter << std::endl;
 		time("calculating g_ab and g^ab", [&](){
 #endif				
+			Grid<MetricPrims, subDim> metricPrimGrid(sizev, (MetricPrims*)x);
 			calc_gLLs_and_gUUs(
 				//input
-				Grid<MetricPrims, subDim>(sizev, (MetricPrims*)x),
+				metricPrimGrid,
 				dt_metricPrimGrid,	//first deriv
 				//output
 				gLLs, gUUs, dt_gLLs);
@@ -917,12 +962,12 @@ for (int i = 0; i < (int)getN(); ++i) {
 		});
 		time("calculating G_ab", [&]{
 #endif
-			Grid<TensorSL, subDim> gy(sizev, (TensorSL*)y);
+			Grid<TensorSL, subDim> EinsteinLLs(sizev, (TensorSL*)y);
 			calc_EinsteinLLs(
 				//input
 				gLLs, gUUs, GammaULLs,
 				//output
-				gy);
+				EinsteinLLs);
 //debugging
 for (int i = 0; i < (int)getN(); ++i) {
 	assert(y[i] == y[i]);
@@ -1107,7 +1152,11 @@ struct JFNK : public Solvers::JFNK<real> {
 		for (int i = 0; i < (int)n; ++i) {
 			sum += r[i] * r[i];
 		}
+#ifdef CONVERGE_ALPHA_ONLY
+		real residual = sqrt(sum) * 8. * M_PI * G / c / c * 1000.;
+#else		
 		real residual = sqrt(sum) / (8. * M_PI) * c * c / G / 1000.;
+#endif
 
 		std::cout << "JFNK::calcResidual"
 			<< " n=" << n
@@ -1118,6 +1167,7 @@ struct JFNK : public Solvers::JFNK<real> {
 #endif	
 		return residual;
 	}
+	size_t getN() const { return n; }
 };
 
 //use JFNK
@@ -1139,40 +1189,96 @@ struct JFNKSolver : public EFESolver {
 		const Grid<MetricPrims, subDim>& dt_metricPrimGrid,	//first deriv
 		const Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid
 	) {
+		
+		FILE* jfnkFile = fopen("jfnk.txt", "w");
+		fprintf(jfnkFile, "#iter residual alpha\n");
+	
+		FILE* gmresFile = fopen("gmres.txt", "w");
+		fprintf(gmresFile, "#jfnk_iter gmres_iter residual\n");
+		
 		assert(sizeof(MetricPrims) == sizeof(EFEGrid.v[0]));	//this should be 10 real numbers and nothing else
+		
+#ifdef CONVERGE_ALPHA_ONLY
+		std::vector<real> alphas(gridVolume);
+		for (int i = 0; i < gridVolume; ++i) {
+			alphas[i] = metricPrimGrid.v[i].alpha;
+		}
+#endif
+		
+		const int gmresRestart = 10;
 		JFNK jfnk(
+#ifdef CONVERGE_ALPHA_ONLY
+			gridVolume,	//n = vector size
+			alphas.data(),	//x = state vector
+#else
 			getN(),	//n = vector size
 			(real*)metricPrimGrid.v,	//x = state vector
+#endif			
 			[&](real* y, const real* x) {	//A = vector function to minimize
+
+#ifdef CONVERGE_ALPHA_ONLY
+				//Grid<MetricPrims, subDim> metricPrimGrid(sizev);
+				for (int k = 0; k < gridVolume; ++k) {
+					metricPrimGrid.v[k].alpha = x[k];
+				}
+#else
+				Grid<MetricPrims, subDim> metricPrimGrid(sizev, (MetricPrims*)x); 
+#endif
 
 #ifdef PRINTTIME
 				std::cout << "iteration " << jfnk.iter << std::endl;
 				time("calculating g_ab and g^ab", [&](){
-#endif				
+#endif			
+				//g_ab = [-1/alpha^2, beta^i/alpha, gamma_ij]
+				//g^ab = inv(g_ab)
 				calc_gLLs_and_gUUs(
 					//input:
-					Grid<MetricPrims, subDim>(sizev, (MetricPrims*)x),
+					metricPrimGrid,
 					dt_metricPrimGrid,	//first deriv
 					//output:
 					gLLs, gUUs, dt_gLLs);
 #ifdef PRINTTIME
 				});
 				time("calculating Gamma^a_bc", [&](){
-#endif				
+#endif			
+				//Gamma^a_bc = 1/2 g^ad (g_db,c + g_dc,b - g_bc,d)
 				calc_GammaULLs(gLLs, gUUs, dt_gLLs, GammaULLs);
 #ifdef PRINTTIME
 				});
 				time("calculating G_ab = 8 pi T_ab", [&]{
 #endif
-				Grid<TensorSL, subDim> gy(sizev, (TensorSL*)y);
+
+#ifdef CONVERGE_ALPHA_ONLY
+				Grid<TensorSL, subDim> EFEGrid(sizev);
+#else				
+				Grid<TensorSL, subDim> EFEGrid(sizev, (TensorSL*)y);
+#endif			
+				//EFE_ab = G_ab - 8 pi T_ab
+				//T_ab = stress energy constraint, whose calculations depend on g_ab and the stress-energy primitives 
+				//G_ab = R_ab - 1/2 R g_ab
+				//R = g^ab R_ab
+				//R_ab = R^c_acb = (pick a more optimized implementation)
+				//R^c_acb = Gamma^c_ab,c - Gamma^c_ac,b + Gamma^c_dc Gamma^d_ab - Gamma^c_db Gamma^d_ac
 				calc_EFE_constraint(
-					Grid<MetricPrims, subDim>(sizev, (MetricPrims*)x),
+					metricPrimGrid,
 					stressEnergyPrimGrid,
-					gy);
+					EFEGrid);
 #ifdef PRINTTIME
 				});
 #endif
 
+#ifdef CONVERGE_ALPHA_ONLY
+				for (int k = 0; k < gridVolume; ++k) {
+					real sum = 0;
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b <= a; ++b) {
+							real d = EFEGrid.v[k](a,b);
+							sum += d * d;
+						}
+					}
+					y[k] = sum;
+				}
+#endif
 
 #if 0 //debug output
 std::cout << "efe constraint" << std::endl;
@@ -1215,9 +1321,9 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 			[&](size_t n, real* x, real* b, JFNK::Func A) -> std::shared_ptr<Solvers::Krylov<real>> {
 				return std::make_shared<GMRes>(
 					n, x, b, A,
-					1e-40, 				//gmres stop epsilon
-					n * 10, 			//gmres max iter
-					100					//gmres restart iter
+					1e-7, 				//gmres stop epsilon
+					n, //n*10,				//gmres max iter
+					gmresRestart		//gmres restart iter
 				);
 			}
 		);
@@ -1225,31 +1331,64 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 		jfnk.maxAlpha = 1;
 		//jfnk.lineSearch = &JFNK::lineSearch_none;
 		jfnk.lineSearch = &JFNK::lineSearch_bisect;
+#ifdef CONVERGE_ALPHA_ONLY	
+		jfnk.lineSearchMaxIter = 250;
+#else
 		jfnk.lineSearchMaxIter = 20;
+#endif
 		jfnk.stopCallback = [&]()->bool{
 			std::cout << "jfnk iter=" << jfnk.getIter() << " alpha=" << jfnk.getAlpha() << " residual=" << jfnk.getResidual() << std::endl;
+			
+			fprintf(jfnkFile, "%d\t%.16f\t%f\n", jfnk.getIter(), jfnk.getResidual(), jfnk.getAlpha());
+			fflush(jfnkFile);
+			fprintf(gmresFile, "\n");
+			fflush(gmresFile);
+			
 			return false;
 		};
 		std::shared_ptr<GMRes> gmres = std::dynamic_pointer_cast<GMRes>(jfnk.getLinearSolver());
+		real lastResidual;
 		gmres->stopCallback = [&]()->bool{
+			if (gmres->getIter() > jfnk.getN()) {
+				if (gmres->getResidual() == lastResidual) {
+					std::cout << "gmres stuck -- aborting gmres" << std::endl;
+					return true;
+				}
+			}
+			lastResidual = gmres->getResidual();
+			
 			//the residual is staying constant ... at 16 even, for a 4*4*4 grid ...
 			std::cout << "gmres"
 				<< " iter=" << gmres->getIter() 
 				<< " residual=" << gmres->getResidual() 
 				<< std::endl;
+			
+			fprintf(gmresFile, "%d\t%d\t%.16f\n", jfnk.getIter(), gmres->getIter(), gmres->getResidual());
+			fflush(gmresFile);
+			
 			return false;
 		};
-		/*
-		jfnk.getLinearSolver()->MInv = [&](real* y, const real* x) {
-			for (int i = 0; i < (int)getN(); ++i) {
+		gmres->MInv = [&](real* y, const real* x) {
+			for (int i = 0; i < (int)jfnk.getN(); ++i) {
 				y[i] = x[i] / (8. * M_PI) * c * c / G / 1000.;
+#ifdef CONVERGE_ALPHA_ONLY
+				y[i] *= c * c;
+#endif
 			}
 		};
-		*/
 
 		time("solving", [&](){
 			jfnk.solve();
 		});
+
+#ifdef CONVERGE_ALPHA_ONLY
+		for (int i = 0; i < gridVolume; ++i) {
+			metricPrimGrid.v[i].alpha = alphas[i];
+		}
+#endif
+
+		fclose(jfnkFile);
+		fclose(gmresFile);
 	}
 };
 
@@ -1708,6 +1847,31 @@ int main(int argc, char** argv) {
 		body->initStressEnergyPrim(stressEnergyPrimGrid, xs);
 	});
 
+	//while we're here, set the 'useE' and 'useV' flags, to spare our calculations
+	time("determine what stress-energy variables to use", [&]() {
+		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
+			StressEnergyPrims& stressEnergyPrims = stressEnergyPrimGrid(index);
+			
+			stressEnergyPrims.useV = false;
+			for (int i = 0; i < subDim; ++i) {
+				stressEnergyPrims.useV |= stressEnergyPrims.v(i) != 0;
+			}
+			
+			stressEnergyPrims.useEM = false;
+#ifdef USE_CHARGE_CURRENT_FOR_EM
+			stressEnergyPrims.useEM |= stressEnergyPrims.chargeDensity != 0;
+			for (int i = 0; i < subDim; ++i) {
+				stressEnergyPrims.useEM |= stressEnergyPrims.currentDensity(i) != 0;
+			}
+#else
+			for (int i = 0; i < subDim; ++i) {
+				stressEnergyPrims.useEM |= stressEnergyPrims.E(i) != 0;
+				stressEnergyPrims.useEM |= stressEnergyPrims.B(i) != 0;
+			}
+#endif
+		});
+	});
 
 	{
 		struct {

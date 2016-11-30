@@ -1,5 +1,6 @@
 -- grid size
-size = 32
+size = 8
+-- 10*8^3 = 5120
 
 -- body specifies the radius of the problem, and the initial stress energy primitives
 --body = 'em_field'
@@ -25,6 +26,6 @@ solver = 'jfnk'
 -- the jfnk will run one or two iterations, but always converge to prims=0
 -- and the efe error looks worse with a flat solution than it does with a Schwarzschild stellar solution 
 -- ... I think fixing that last one will help the results converge.
-maxiter = 1
+maxiter = 100
 
 outputFilename = 'out.txt'

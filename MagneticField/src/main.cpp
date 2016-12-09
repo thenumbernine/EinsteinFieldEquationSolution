@@ -189,26 +189,25 @@ int main() {
 		{"iz", [&](Vector<int,gridDim> index)->real{ return index(2); }},
 	};
 	for (int i = 0; i < dim; ++i) {
-		Col c(
+		cols.push_back(Col(
 			std::string("A^") + std::string(xs[i]),
-			[&,=i](Vector<int,gridDim> index)->real{ return AU(index)(i); },
-		);
-		cols.push_back(c);
+			[&,i](Vector<int,gridDim> index)->real{ return AU(index)(i); }
+		));
 	}
 	for (int i = 0; i < dim; ++i) {
 		cols.push_back(Col(
 			std::string("J^") + std::string(xs[i]),
-			[&,=i](Vector<int,gridDim> index)->real{ return JU(index)(i); },
+			[&,i](Vector<int,gridDim> index)->real{ return JU(index)(i); }
 		));
 	}
 	for (int i = 0; i < 3; ++i) {
 		cols.push_back(Col(
 			std::string("E^") + std::string(xs[i+1]),
-			[&,=i](Vector<int,gridDim> index)->real{ return E(index)(i); },
+			[&,i](Vector<int,gridDim> index)->real{ return E(index)(i); }
 		));
 		cols.push_back(Col(
 			std::string("B^") + std::string(xs[i+1]),
-			[&,=i](Vector<int,gridDim> index)->real{ return B(index)(i); },
+			[&,i](Vector<int,gridDim> index)->real{ return B(index)(i); }
 		));
 	}
 
@@ -225,18 +224,15 @@ int main() {
 		}
 	}
 	fprintf(file, "\n");
-	time("outputting", [&]{
-		//this is printing output, so don't do it in parallel		
-		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
-		for (RangeObj<subDim>::iterator iter = range.begin(); iter != range.end(); ++iter) {
-			const char* tab = "";
-			for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {
-				fprintf(file, "%s%.16e", tab, p->func(iter.index));
-				tab = "\t";
-			}
-			fprintf(file, "\n");
+	//this is printing output, so don't do it in parallel		
+	for (RangeObj<gridDim>::iterator iter = range.begin(); iter != range.end(); ++iter) {
+		const char* tab = "";
+		for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {
+			fprintf(file, "%s%.16e", tab, p->func(iter.index));
+			tab = "\t";
 		}
-	});
+		fprintf(file, "\n");
+	}
 
 	fclose(file);
 }

@@ -528,6 +528,7 @@ assert(dGammaULLL(a,b,c,i+1) == dGammaULLL(a,b,c,i+1));
 		}
 	}
 	
+#if 0	//calculate the Riemann, then the Ricci
 	const TensorUSL &GammaULL = GammaULLs(index);
 	TensorULLL GammaSqULLL;
 	for (int a = 0; a < dim; ++a) {
@@ -546,7 +547,6 @@ assert(GammaSqULLL(a,b,c,d) == GammaSqULLL(a,b,c,d));
 		}
 	}
 
-#if 0	//calculate the Riemann, then the Ricci
 	/*
 	technically the last two are antisymmetric ... but I don't think I have that working yet ... 
 	...and if I stored RiemannLLLL then the first two would be antisymmetric as well, and the pairs of the first two and second two would be symmetric

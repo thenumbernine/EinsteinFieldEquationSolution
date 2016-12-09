@@ -15,8 +15,7 @@ goals:
 * add time 2nd derivatives to metric prims, from this compute time derivatives of connections, from that the Riemann, and then the Ricci and Einstein
 * 6. get JFNK to work.
 	My goal is to start at flat space, given Earth's stress-energy source term, and come up with Earth's gravity, as the Schwarzschild analytical answer already gives us.
-	However starting in flat or Schwarzschild stellar, it takes one step then gets stuck in a (local, I hope) minima.
-	Looking at distributions of numbers, the stellar and flat are both wrong: the stellar gets nonzero G_ab values in the vacuum (due to numeric errors of derivative approximations), and the flat gets nonzero G_ab values inside the body.
+	I am getting descent, however it is going really slow, so I'm going to port this project to OpenCL...
 
 ## Finite Difference Results:
 

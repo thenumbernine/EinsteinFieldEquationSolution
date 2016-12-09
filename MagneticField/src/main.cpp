@@ -2,11 +2,12 @@
 #include "Parallel/Parallel.h"
 #include "Tensor/Grid.h"
 #include "Solvers/GMRes.h"
+#include "Common/Macros.h"
 
 Parallel::Parallel parallel(8);
 
 const int gridDim = 3;
-const int dim = 1;
+const int dim = 4;
 
 typedef double real;
 using namespace Tensor;
@@ -65,10 +66,12 @@ int main() {
 	}
 	Grid<Vector<real, dim>, gridDim> JU(size);
 	Grid<Vector<real, dim>, gridDim> AU(size);
-	real dxSq = 1;
+	real dx = 1;
+	real dxSq = dx*dx;
 
 	//solve for AU
 	RangeObj<gridDim> range = JU.range();
+#if 0
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, gridDim>& index) {
 		Vector<real,gridDim> dx = ((Vector<real,gridDim>)index + .5) - size/2;
 		real linfDist = 0;
@@ -77,10 +80,25 @@ int main() {
 			linfDist = std::max<real>(linfDist, fabs(dx(i)));
 			if (dx(i) < 0) sign = -sign;
 		}
-
 		const real r = 15;
 		JU(index)(0) = linfDist < r ? sign : 0;
-		AU(index) = JU(index);
+	});
+#endif
+	
+	//lazy rasterization
+	for (int i = 0; i < 8 * (int)n; ++i) {
+		real th = 2. * M_PI * (real)i / (real)(4*n);
+		int x = .5 * size(0) + .25 * n * cos(th);
+		int y = .5 * size(1) + .25 * n * sin(th);
+		int z = .5 * size(2);
+		JU(x,y,z)(0) = 1;
+		JU(x,y,z)(1) = -sin(th);
+		JU(x,y,z)(2) = cos(th);
+		JU(x,y,z)(3) = 0;
+	}
+
+	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, gridDim>& index) {
+		AU(index) = -JU(index);
 	});
 
 	Solvers::Krylov<real>::Func A = [&](real* JU_, const real* AU_) {
@@ -121,7 +139,7 @@ int main() {
 	};
 
 	int volume = size.volume() * dim;
-	Solvers::GMRes<real> solver(volume, (real*)AU.v, (const real*)JU.v, A, 1e-7, volume * 10, volume);
+	Solvers::GMRes<real> solver(volume, (real*)AU.v, (const real*)JU.v, A, 2e-2, volume, 100);
 	
 	solver.stopCallback = [&]()->bool{
 		std::cerr << solver.getResidual() << "\t" << solver.getIter() << std::endl;
@@ -130,38 +148,95 @@ int main() {
 
 	solver.solve();
 
+
+	//calculate E and B
+	Grid<Vector<real, dim-1>, gridDim> E(size), B(size);
+
+	//E^i = -grad phi - d/dt A
+	//B^i = curl A
+	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, gridDim>& index) {
+		Vector<int,dim> dAU[3];
+		for (int i = 0; i < gridDim; ++i) {
+			Vector<int, gridDim> ip = index;
+			ip(i) = std::min<int>(ip(i)+1, n-1);
+			Vector<int, gridDim> im = index;
+			im(i) = std::max<int>(im(i)-1, 0);
+			for (int u = 0; u < gridDim; ++u) {
+				dAU[i](u) = (AU(ip)(u) - AU(im)(u)) / (2. * dx);	//... TODO - d/dt AU
+			}
+		}
+		for (int i = 0; i < 3; ++i) {
+			int i2 = (i+1)%3;
+			int i3 = (i+2)%3;
+			E(index)(i) = -dAU[i](0);	//... TODO - d/dt AU
+			B(index)(i) = dAU[i2](i3+1) - dAU[i3](i2+1);
+		}
+	});
+
 	//hmm, TODO if dim < 4 then xyz else txyz
-	const char* xs = {"x", "y", "z", "t"};
+	const char* xs[] = {"t", "x", "y", "z"};
 	assert(numberof(xs) >= gridDim);
 	assert(numberof(xs) >= dim);
-	std::cout << "#x";
-	for (int i = 1; i < gridDim; ++i) {
-		std::cout << "\t" << xs[i];
+	
+	struct Col {
+		std::string name;
+		std::function<real(Vector<int,gridDim>)> func;
+		Col(std::string name_, std::function<real(Vector<int,gridDim>)> func_) : name(name_), func(func_) {}
+	};
+	std::vector<Col> cols = {
+		{"ix", [&](Vector<int,gridDim> index)->real{ return index(0); }},
+		{"iy", [&](Vector<int,gridDim> index)->real{ return index(1); }},
+		{"iz", [&](Vector<int,gridDim> index)->real{ return index(2); }},
+	};
+	for (int i = 0; i < dim; ++i) {
+		Col c(
+			std::string("A^") + std::string(xs[i]),
+			[&,=i](Vector<int,gridDim> index)->real{ return AU(index)(i); },
+		);
+		cols.push_back(c);
 	}
 	for (int i = 0; i < dim; ++i) {
-		std::cout << "\tA" << xs[i];
+		cols.push_back(Col(
+			std::string("J^") + std::string(xs[i]),
+			[&,=i](Vector<int,gridDim> index)->real{ return JU(index)(i); },
+		));
 	}
-	for (int i = 0; i < dim; ++i) {
-		std::cout << "\tJ" << xs[i];
+	for (int i = 0; i < 3; ++i) {
+		cols.push_back(Col(
+			std::string("E^") + std::string(xs[i+1]),
+			[&,=i](Vector<int,gridDim> index)->real{ return E(index)(i); },
+		));
+		cols.push_back(Col(
+			std::string("B^") + std::string(xs[i+1]),
+			[&,=i](Vector<int,gridDim> index)->real{ return B(index)(i); },
+		));
 	}
-	std::cout << std::endl;
 
-	int lastY = 0;
-	std::for_each(range.begin(), range.end(), [&](const Vector<int, gridDim>& index) {
-		if (index(1) != lastY) {
-			lastY = index(1);
-			std::cout << std::endl;
+	std::string outputFilename = "out.txt";
+	FILE* file = fopen(outputFilename.c_str(), "w");
+	if (!file) throw Common::Exception() << "failed to open file " << outputFilename;
+
+	fprintf(file, "#");
+	{
+		const char* tab = "";
+		for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {
+			fprintf(file, "%s%s", tab, p->name.c_str());
+			tab = "\t";
 		}
-		std::cout << index(0);
-		for (int i = 1; i < gridDim; ++i) {
-			std::cout << "\t" << index(i);
+	}
+	fprintf(file, "\n");
+	time("outputting", [&]{
+		//this is printing output, so don't do it in parallel		
+		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
+		for (RangeObj<subDim>::iterator iter = range.begin(); iter != range.end(); ++iter) {
+			const char* tab = "";
+			for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {
+				fprintf(file, "%s%.16e", tab, p->func(iter.index));
+				tab = "\t";
+			}
+			fprintf(file, "\n");
 		}
-		for (int i = 0; i < dim; ++i) {
-			std::cout << "\t" << AU(index)(i);
-		}
-		for (int i = 0; i < dim; ++i) {
-			std::cout << "\t" << JU(index)(i);
-		}
-		std::cout << std::endl;
 	});
+
+	fclose(file);
 }

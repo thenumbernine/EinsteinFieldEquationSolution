@@ -205,6 +205,8 @@ int main() {
 			std::string("E^") + std::string(xs[i+1]),
 			[&,i](Vector<int,gridDim> index)->real{ return E(index)(i); }
 		));
+	}
+	for (int i = 0; i < 3; ++i) {
 		cols.push_back(Col(
 			std::string("B^") + std::string(xs[i+1]),
 			[&,i](Vector<int,gridDim> index)->real{ return B(index)(i); }

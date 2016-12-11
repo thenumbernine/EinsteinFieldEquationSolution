@@ -309,11 +309,6 @@ function App:update()
 
 	for i,clipInfo in ipairs(clipInfos) do
 		gl.glClipPlane(gl.GL_CLIP_PLANE0+i-1, vec4d(clipInfo.plane:unpack()):ptr())
--- intel/ubuntu was having trouble when the clip plane included the viewport
--- so I moved the clipping code to the shader
---		if clipInfo.enabled[0] then 
---			gl.glEnable(gl.GL_CLIP_PLANE0+i-1)
---		end
 	end
 
 	gl.glTranslatef(-.5, -.5, -.5)
@@ -392,6 +387,15 @@ function App:update()
 	volumeShader:useNone()
 
 	if showGradTrace[0] or showCurlTrace[0] then
+		for i,clipInfo in ipairs(clipInfos) do
+-- intel/ubuntu was having trouble when the clip plane included the viewport
+-- so I moved the clipping code to the shader
+			if clipInfo.enabled[0] then 
+				gl.glEnable(gl.GL_CLIP_PLANE0+i-1)
+			end
+		end
+	
+		
 		gl.glDisable(gl.GL_DEPTH_TEST)
 
 		self.gradLists = self.gradLists or {}
@@ -515,11 +519,11 @@ function App:update()
 			end
 		end
 		gl.glEnable(gl.GL_DEPTH_TEST)
+	
+		for i,clipInfo in ipairs(clipInfos) do
+			gl.glDisable(gl.GL_CLIP_PLANE0+i-1)
+		end
 	end
-
---	for i,clipInfo in ipairs(clipInfos) do
---		gl.glDisable(gl.GL_CLIP_PLANE0+i-1)
---	end
 
 	glreport'here'
 

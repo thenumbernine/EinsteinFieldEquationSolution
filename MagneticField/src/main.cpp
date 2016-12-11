@@ -86,12 +86,14 @@ int main() {
 #endif
 	
 	//lazy rasterization
-	for (int i = 0; i < 8 * (int)n; ++i) {
-		real th = 2. * M_PI * (real)i / (real)(4*n);
+	int divs = 8 * (int)n;
+	for (int i = 0; i < divs; ++i) {
+		real frac = (real)i / (real)divs;
+		real th = 2. * M_PI * frac;
 		int x = .5 * size(0) + .25 * n * cos(th);
 		int y = .5 * size(1) + .25 * n * sin(th);
 		int z = .5 * size(2);
-		JU(x,y,z)(0) = 1;
+		JU(x,y,z)(0) = 1;//frac * 2. - 1.;
 		JU(x,y,z)(1) = -sin(th);
 		JU(x,y,z)(2) = cos(th);
 		JU(x,y,z)(3) = 0;
@@ -150,26 +152,26 @@ int main() {
 
 
 	//calculate E and B
-	Grid<Vector<real, dim-1>, gridDim> E(size), B(size);
+	Grid<Vector<real, 3>, gridDim> E(size), B(size);
 
 	//E^i = -grad phi - d/dt A
 	//B^i = curl A
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, gridDim>& index) {
-		Vector<int,dim> dAU[3];
+		real dAU[gridDim][dim];
 		for (int i = 0; i < gridDim; ++i) {
 			Vector<int, gridDim> ip = index;
 			ip(i) = std::min<int>(ip(i)+1, n-1);
 			Vector<int, gridDim> im = index;
 			im(i) = std::max<int>(im(i)-1, 0);
-			for (int u = 0; u < gridDim; ++u) {
-				dAU[i](u) = (AU(ip)(u) - AU(im)(u)) / (2. * dx);	//... TODO - d/dt AU
+			for (int u = 0; u < dim; ++u) {
+				dAU[i][u] = (AU(ip)(u) - AU(im)(u)) / (2. * dx);	//... TODO - d/dt AU
 			}
 		}
 		for (int i = 0; i < 3; ++i) {
 			int i2 = (i+1)%3;
 			int i3 = (i+2)%3;
-			E(index)(i) = -dAU[i](0);	//... TODO - d/dt AU
-			B(index)(i) = dAU[i2](i3+1) - dAU[i3](i2+1);
+			E(index)(i) = -dAU[i][0];	//... TODO - d/dt AU
+			B(index)(i) = dAU[i2][i3+1] - dAU[i3][i2+1];
 		}
 	});
 
@@ -200,18 +202,43 @@ int main() {
 			[&,i](Vector<int,gridDim> index)->real{ return JU(index)(i); }
 		));
 	}
-	for (int i = 0; i < 3; ++i) {
-		cols.push_back(Col(
-			std::string("E^") + std::string(xs[i+1]),
-			[&,i](Vector<int,gridDim> index)->real{ return E(index)(i); }
-		));
-	}
-	for (int i = 0; i < 3; ++i) {
-		cols.push_back(Col(
-			std::string("B^") + std::string(xs[i+1]),
-			[&,i](Vector<int,gridDim> index)->real{ return B(index)(i); }
-		));
-	}
+	
+	cols.push_back(Col("E^x", [&](Vector<int,gridDim> index)->real{ return E(index)(0); }));
+	cols.push_back(Col("E^y", [&](Vector<int,gridDim> index)->real{ return E(index)(1); }));
+	cols.push_back(Col("E^z", [&](Vector<int,gridDim> index)->real{ return E(index)(2); }));
+	cols.push_back(Col("B^x", [&](Vector<int,gridDim> index)->real{ return B(index)(0); }));
+	cols.push_back(Col("B^y", [&](Vector<int,gridDim> index)->real{ return B(index)(1); }));
+	cols.push_back(Col("B^z", [&](Vector<int,gridDim> index)->real{ return B(index)(2); }));
+	
+	cols.push_back(Col("|E|", [&](Vector<int,gridDim> index)->real{
+		return Vector<real,gridDim>::length(E(index));
+	}));
+	cols.push_back(Col("|B|", [&](Vector<int,gridDim> index)->real{
+		return Vector<real,gridDim>::length(B(index));
+	}));
+	cols.push_back(Col("div_E", [&](Vector<int,gridDim> index)->real{
+		real div = 0.;
+		for (int i = 0; i < gridDim; ++i) {
+			Vector<int, gridDim> ip = index;
+			ip(i) = std::min<int>(ip(i)+1, n-1);
+			Vector<int, gridDim> im = index;
+			im(i) = std::max<int>(im(i)-1, 0);
+			div += (E(ip)(i) - E(im)(i)) / (2. * dx);	//... TODO - d/dt AU
+		}
+		return div;
+	}));
+	cols.push_back(Col("div_B", [&](Vector<int,gridDim> index)->real{
+		real div = 0.;
+		for (int i = 0; i < gridDim; ++i) {
+			Vector<int, gridDim> ip = index;
+			ip(i) = std::min<int>(ip(i)+1, n-1);
+			Vector<int, gridDim> im = index;
+			im(i) = std::max<int>(im(i)-1, 0);
+			div += (B(ip)(i) - B(im)(i)) / (2. * dx);	//... TODO - d/dt AU
+		}
+		return div;
+	}));
+
 
 	std::string outputFilename = "out.txt";
 	FILE* file = fopen(outputFilename.c_str(), "w");

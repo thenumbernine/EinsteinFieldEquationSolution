@@ -1,6 +1,6 @@
 #!/usr/bin/env luajit
-local ni = ... and tonumber(...) or 8
-local conjgrad = require 'LinearSolvers.ConjugateGradient'
+local ni = ... and tonumber(...) or 64
+local gmres = require 'LinearSolvers.GeneralizedMinimalResidual'
 local matrix = require 'matrix'
 
 local n = {ni,ni,ni}
@@ -16,7 +16,7 @@ local rho = matrix.lambda(n, function(i,j,k)
 		) or 0
 end)
 
-local phi = conjgrad{
+local phi = gmres{
 	x = rho,
 	b = rho,
 	A = function(phi)
@@ -42,6 +42,7 @@ local phi = conjgrad{
 	errorCallback = function(err,iter)
 		io.stderr:write(tostring(err)..'\t'..tostring(iter)..'\n')
 	end,
+	epsilon = 1e-5,
 	maxiter = ni^3,
 	restart = 100,	--gmres-only
 }

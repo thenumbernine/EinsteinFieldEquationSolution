@@ -13,18 +13,75 @@ typedef double real;
 using namespace Tensor;
 
 /*
+charge density
+coulumbs per meter^3
+1 coulumb = 6.242e+18 e
+how do you convert coulumbs to meters?
+by setting the Coulumb constant to 1?  via Planck units?
+1 = ~c~ = 299792458 m / s = c m / s
+	m / s = 1 / c
+	1 s = c m
+	1 s = 299792458 m
+1 = ~hBar~ = 1.05457180013e-34 kg m^2 / s 
+	1 = hBar kg m^2 / s
+	kg = c / hBar / m
+	kg = 2.842788494468e+42 / m
+1 = ~G~ = 6.67408e-11 m^3 / (kg s^2) 
+	kg = G m^3 / s^2
+	kg = G / c^2 m
+	kg = 7.4259154861063e-28 m
+	...but kg = c / hBar / m
+	...so c / hBar / m = G / c^2 m
+		m = sqrt(c^3 / (hBar G))
+		m = 6.1872444306747e+34
+		s = c m
+		s = 1.8548892161188e+43
+		kg = 45945954.234073
+1 = ~ke~ = ke kg m^3 / (s^2 C^2) = 8.9875517873681764e+9 kg m^3 / (s^2 C^2) 
+	C^2 = ke kg m^3 / s^2
+	C^2 = ke G / c^4 m^2
+	C = sqrt(ke G) / c^2 m using G's def
+	C = 8.6173751723517e-18 m
+	C^2 = ke / (hBar c) using hBar's def
+	C = = 5.3317806542168e+17 using either
+1 = ~kB~ = kB m^2 kg / (K s^2) = 1.3806488e-23 m^2 kg / (K s^2)
+	K = kB kg m^2 / s^2 = kB / c^2 kg 
+	K = kB G / c^4 m using G's def
+	K = kB / (c hBar m) using hBar's def
+	K = 7.0581208407927e-33
+
+1 C = e ~e~ = 6.2415093414e+18 ~e~
+	~e~ = C / e = sqrt(ke G) / (c^2 e) m
+	~e~ = 1.380655655707e-36 m
+	~e~ = 1.380655655707e-36 m
+	~e~ = 0.085424540164524
+
+
+J = kg m^2 / s^2 = kg / c^2 = G / c^4
+1 erg = 1e-7 J = 1e-7 kg m^2 / s^2 = 1e-7 G / c^4
+J = C V 
+
+*/
+real c = 299792458;
+real G = 6.67408e-11;
+real ke = 8.9875517873681764e+9;	// = 1 / (4 pi epsilon0)
+real hBar = 1.05457180013e-34;
+real kB = 1.3806488e-23;
+real e = 6.2415093414e+18;
+
+/*
 
 J_a = (rho, j_i)
 
 flat space:
 
-F^uv_,v = -4 pi J^u
+F^uv_,v = 4 pi J^u
 F_uv = A_v,u - A_u,v
-A^v,u_v - A^u,v_v = -4 pi J^u
+A^v,u_v - A^u,v_v = 4 pi J^u
 
 curved space:
 
-A^a;u_u - A^u_;u^;a - R^a_u A^u = -4 pi J^a
+A^a;u_u - A^u_;u^;a - R^a_u A^u = 4 pi J^a
 
 use gauge A^u_;u = 0
 
@@ -59,26 +116,27 @@ A^a;u_;u = A^a;u_,u + Gamma^a_bu A^b;u + Gamma^u_bu A^a;b
 */
 
 int main() {
-	size_t n = 50;
+	size_t n = 64;
 	Vector<int, gridDim> size;
 	for (int i = 0; i < gridDim; ++i) {
 		size(i) = n;
 	}
+	Vector<real, gridDim> xmin(-1,-1,-1);
+	Vector<real, gridDim> xmax(1,1,1);
+	Vector<real, gridDim> dx = (xmax - xmin) / (Vector<real,gridDim>)size;
 	Grid<Vector<real, dim>, gridDim> JU(size);
 	Grid<Vector<real, dim>, gridDim> AU(size);
-	real dx = 1;
-	real dxSq = dx*dx;
 
 	//solve for AU
 	RangeObj<gridDim> range = JU.range();
 #if 0
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, gridDim>& index) {
-		Vector<real,gridDim> dx = ((Vector<real,gridDim>)index + .5) - size/2;
+		Vector<real,gridDim> x = ((Vector<real,gridDim>)index + .5) - size/2;
 		real linfDist = 0;
 		real sign = 1;
 		for (int i = 0; i < gridDim; ++i) {
-			linfDist = std::max<real>(linfDist, fabs(dx(i)));
-			if (dx(i) < 0) sign = -sign;
+			linfDist = std::max<real>(linfDist, fabs(x(i)));
+			if (x(i) < 0) sign = -sign;
 		}
 		const real r = 15;
 		JU(index)(0) = linfDist < r ? sign : 0;
@@ -93,9 +151,18 @@ int main() {
 		int x = .5 * size(0) + .25 * n * cos(th);
 		int y = .5 * size(1) + .25 * n * sin(th);
 		int z = .5 * size(2);
-		JU(x,y,z)(0) = 1;//frac * 2. - 1.;
-		JU(x,y,z)(1) = -sin(th);
-		JU(x,y,z)(2) = cos(th);
+	
+		real q = 1;	//Coulombs (C)
+		q *= sqrt(ke * G) / (c * c);	//...times Columbs to meters (m)
+		q *= dx.volume();	// ... per meter cubed (1/m^2)
+		
+		JU(x,y,z)(0) = q;
+		
+		real I = q;	//amps (C / s) => 1/(m^2 s)
+		I *= c;		//(1/m^3)
+		
+		JU(x,y,z)(1) = -I * sin(th);
+		JU(x,y,z)(2) = I * cos(th);
 		JU(x,y,z)(3) = 0;
 	}
 
@@ -127,6 +194,7 @@ int main() {
 		
 		//A^a;b_;b
 
+		//solve for del A^i = J^i
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, gridDim>& index) {
 			Vector<real, dim> sum = AU(index) * (-2. * (real)gridDim);
 			for (int k = 0; k < gridDim; ++k) {
@@ -136,7 +204,7 @@ int main() {
 				im(k) = std::max<int>(im(k)-1, 0);
 				sum += AU(ip) + AU(im);
 			}
-			JU(index) = sum / dxSq;
+			JU(index) = sum / dx.volume();
 		});
 	};
 
@@ -164,7 +232,7 @@ int main() {
 			Vector<int, gridDim> im = index;
 			im(i) = std::max<int>(im(i)-1, 0);
 			for (int u = 0; u < dim; ++u) {
-				dAU[i][u] = (AU(ip)(u) - AU(im)(u)) / (2. * dx);	//... TODO - d/dt AU
+				dAU[i][u] = (AU(ip)(u) - AU(im)(u)) / (2. * dx(i));	//... TODO - d/dt AU
 			}
 		}
 		for (int i = 0; i < 3; ++i) {
@@ -223,7 +291,7 @@ int main() {
 			ip(i) = std::min<int>(ip(i)+1, n-1);
 			Vector<int, gridDim> im = index;
 			im(i) = std::max<int>(im(i)-1, 0);
-			div += (E(ip)(i) - E(im)(i)) / (2. * dx);	//... TODO - d/dt AU
+			div += (E(ip)(i) - E(im)(i)) / (2. * dx(i));	//... TODO - d/dt AU
 		}
 		return div;
 	}));
@@ -234,7 +302,7 @@ int main() {
 			ip(i) = std::min<int>(ip(i)+1, n-1);
 			Vector<int, gridDim> im = index;
 			im(i) = std::max<int>(im(i)-1, 0);
-			div += (B(ip)(i) - B(im)(i)) / (2. * dx);	//... TODO - d/dt AU
+			div += (B(ip)(i) - B(im)(i)) / (2. * dx(i));	//... TODO - d/dt AU
 		}
 		return div;
 	}));

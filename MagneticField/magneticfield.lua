@@ -1,5 +1,7 @@
 #!/usr/bin/env luajit
 local ni = ... and tonumber(...) or 64
+local conjgrad = require 'LinearSolvers.ConjugateGradient'
+local conjres = require 'LinearSolvers.ConjugateResidual'
 local gmres = require 'LinearSolvers.GeneralizedMinimalResidual'
 local matrix = require 'matrix'
 
@@ -16,8 +18,12 @@ local rho = matrix.lambda(n, function(i,j,k)
 		) or 0
 end)
 
-local phi = gmres{
-	x = rho,
+local phi = 
+conjgrad
+--conjres
+--gmres
+{
+	x = -rho,
 	b = rho,
 	A = function(phi)
 		return matrix.lambda(n, function(i,j,k)
@@ -33,7 +39,7 @@ local phi = gmres{
 					+ phi[i][j-1][k]
 					+ phi[i][j][k+1]
 					+ phi[i][j][k-1]
-					- 6 * phi[i][j][k]) / (h2 * 6 * math.pi)
+					- 6 * phi[i][j][k]) / h2
 			end
 		end)
 	end,
@@ -47,11 +53,13 @@ local phi = gmres{
 	restart = 100,	--gmres-only
 }
 
-print('#x y z rho phi')
+local file = assert(io.open('out.txt', 'wb'))
+file:write('#x y z rho phi\n')
 for i=1,n[1] do
 	for j=1,n[2] do
 		for k=1,n[3] do
-			print(i-1,j-1,k-1,rho[i][j][k],phi[i][j][k])
+			file:write(i-1,'\t',j-1,'\t',k-1,'\t',rho[i][j][k],'\t',phi[i][j][k],'\n')
 		end
 	end
 end
+file:close()

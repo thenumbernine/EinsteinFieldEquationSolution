@@ -1,6 +1,7 @@
 #!/usr/bin/env luajit
 
 local ffi = require 'ffi'
+local template = require 'template'
 
 --[[
 just like in LinearSolvers.ConjugateGradient, except with favor towards reusing object (for the sake of CL buffers)
@@ -102,23 +103,90 @@ local function conjresCL(args)
 	local dot = assert(args.dot)
 	local mulAdd = assert(args.mulAdd)
 
+	local r = new()
+	local p = new()
+	local Ap = new()
+	local Ar = new()
+	local MInvAp = MInv and new() or Ap
+
+	local bNorm = dot(b,b)
+	if bNorm == 0 then bNorm = 1 end
+
+	A(r, x)
+	mulAdd(r, b, r, -1)
+	
+	if MInv then MInv(r, r) end
+	local rDotMInvR = dot(r, r)
+
+	repeat
+		local err = dot(r, r) / bNorm
+		if errorCallback and errorCallback(err, 0) then break end
+		if err < epsilon then break end
+
+		A(Ar, r)
+		local rAr = dot(r, Ar)
+		copy(p, r)
+		A(Ap, p)
+		for iter=1,maxiter do
+			if MInv then MInv(MInvAp, Ap) end
+			local alpha = rAr / dot(Ap, MInvAp)
+			mulAdd(x, x, p, alpha)
+			mulAdd(r, r, MInvAp, -alpha)
+		
+			local err = dot(r, r) / bNorm
+			if errorCallback and errorCallback(err, iter) then break end
+			if err < epsilon then break end
+		
+			A(Ar, r)
+			local nrAr = dot(r, Ar)
+			local beta = nrAr
+
+			rAr = nrAr
+			mulAdd(p, r, p, beta)
+			mulAdd(Ap, Ar, Ap, beta)
+		end
+	
+	until true -- just run once / use for break jumps
+
+	if free then
+		free(r)
+		free(p)
+		free(Ap)
+		free(Ar)
+		if MInv then free(MInvAp) end
+	end
+
+	return x
 end
 
 -- TODO put this in EinsteinFieldEquation/MagneticField or something?  this doesn't use LinearSolvers just yet
 -- ye olde poisson problem
 -- A x = y, y = rho, x = phi, A = del^2
 
-local env = require 'cl.obj.env'{size={8,8,8}}
+local env = require 'cl.obj.env'{size={64,64,64}}
 
 local rho = env:buffer{name='rho'}
 local phi = env:buffer{name='phi'}
 
-local program = env:program()
+local program = env:program{
+	code = template([[
+constant real4 dx = (real4)(<?=clnumber(1/tonumber(size.x))?>, <?=clnumber(1/tonumber(size.y))?>, <?=clnumber(1/tonumber(size.z))?>, 1);
+]], {
+	size = env.size,
+	clnumber = require 'cl.obj.number',
+}),
+}
 
 local init = program:kernel{
 	argsOut = {phi, rho},
 	body = [[ 
-	rho[index] = i.x==size.x/2 && i.y==size.y/2 && i.z==size.z/2 ? -1 : 0;
+	const real M = 1e+6;
+	rho[index] = abs(i.x - size.x/2) < 1 
+				&& abs(i.y - size.y/2) < 1
+				&& abs(i.z - size.z/2) < 1
+				? (
+					i.x >= size.x/2 ? M : -M
+				) : 0;
 	phi[index] = -rho[index];
 ]],
 }
@@ -127,29 +195,22 @@ local init = program:kernel{
 local A = program:kernel{
 	argsOut = {{name='A_phi', buf=true}}, 
 	argsIn = {{name='phi', buf=true}}, 
-	body = require 'template'([[
-	const real4 dx = (real4)(1,1,1,1);
-	
-	real sum = 0;
-	<? for i=0,gridDim-1 do ?>{	
-		int4 iL = i;
-		iL.s<?=i?> = max(i.s<?=i?> - 1, 0);
-		int indexL = indexForInt4(iL);
-		
-		int4 iR = i;
-		iR.s<?=i?> = min(i.s<?=i?> + 1, size.s<?=i?> - 1);
-		int indexR = indexForInt4(iR);
-		
-		sum += (phi[indexL] + phi[indexR]) / (dx.s<?=i?> * dx.s<?=i?>);
-	}<? end ?>
-
-	sum -= 2. * (0
-<? for i=0,gridDim-1 do ?>
-		+ 1. / (dx.s<?=i?> * dx.s<?=i?>)
-<? end ?>
-	) * phi[index];
-
-	A_phi[index] = sum;
+	body = template([[	
+	if (i.x == 0 || i.x >= size.x-1 ||
+		i.y == 0 || i.y >= size.y-1 ||
+		i.z == 0 || i.z >= size.z-1)
+	{
+		A_phi[index] = 0;	//boundary conditions
+	} else {
+		A_phi[index] = (phi[index + stepsize.x] + phi[index - stepsize.x]) / (dx.x * dx.x)
+					+ (phi[index + stepsize.y] + phi[index - stepsize.y]) / (dx.y * dx.y)
+					+ (phi[index + stepsize.z] + phi[index - stepsize.z]) / (dx.z * dx.z)
+					- phi[index] * 2. * (
+						1. / (dx.x * dx.x)
+						+ 1. / (dx.y * dx.y)
+						+ 1. / (dx.z * dx.z)
+					);
+	}
 ]], {
 	gridDim = env.gridDim,
 	gridSize = env.size,
@@ -177,10 +238,10 @@ local dot = env:reduce{
 
 init()
 
-conjgradCL{
-	A = function(y, x)
-		A(y.buf, x.buf)
-	end,
+conjgradCL
+--conjresCL
+{
+	A = function(y, x) A(y.buf, x.buf) end,
 	b = rho,
 	x = phi,
 	maxiter = env.volume,
@@ -206,17 +267,28 @@ conjgradCL{
 	end,
 }
 
-local file = assert(io.open('out.txt', 'wb'))
-file:write('#x y z rho phi\n')
+print'copying to cpu...'
 local rhoCPU = rho:toCPU()
 local phiCPU = phi:toCPU()
+print'writing results...'
+local file = assert(io.open('out.txt', 'wb'))
+file:write('#x y z rho phi\n')
 local index = 0
 for i=0,tonumber(env.size.x)-1 do
 	for j=0,tonumber(env.size.y)-1 do
 		for k=0,tonumber(env.size.z)-1 do
-			file:write(i,'\t',j,'\t',k,'\t',rhoCPU[index],'\t',phiCPU[index],'\n')
+			local line = tostring(i)..'\t'..
+				tostring(j)..'\t'..
+				tostring(k)..'\t'..
+				tostring(rhoCPU[index])..'\t'..
+				tostring(phiCPU[index])..'\n'
+			file:write(line)
+			file:flush()
+			io.write(line)
+			io:flush()
 			index = index + 1
 		end
 	end
 end
 file:close()
+print'done!'

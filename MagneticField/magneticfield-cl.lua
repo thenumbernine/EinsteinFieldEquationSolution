@@ -1,9 +1,10 @@
 #!/usr/bin/env luajit
 -- TODO put this in EinsteinFieldEquation/MagneticField or something?  this doesn't use LinearSolvers just yet
+-- TODO use a linear solver?
 -- ye olde poisson problem
 -- A x = y, y = rho, x = phi, A = del^2
 
-local size = {4,4,4}
+local size = {64,64,64}
 local env = require 'cl.obj.env'{size=size}
 
 local rho = env:buffer{name='rho'}
@@ -45,29 +46,21 @@ local iter = env:kernel{argsOut={phi}, argsIn={rho}, body=require 'template'([[
 	gridSize = env.size,
 })}
 
-local phiSq = env:buffer{name='phiSq'}
-local sum = env:reduce{
-	op = function(x,y) return x..'+'..y end,
-	buffer = phiSq.buf,
-}
-local sq = env:kernel{argsOut={phiSq}, argsIn={phi}, body=[[	phiSq[index] = phi[index] * phi[index];]]}
-
 for i=1,100 do
 	iter()
-	sq()
-	print(i,sum())
 end
-os.exit()
 
-print('#x y z rho phi')
+local file = assert(io.open('out.txt', 'wb'))
+file:write('#x y z rho phi\n')
 local rhoCPU = rho:toCPU()
 local phiCPU = phi:toCPU()
 local index = 0
 for i=0,size[1]-1 do
 	for j=0,size[2]-1 do
 		for k=0,size[3]-1 do
-			print(i,j,k,rhoCPU[index],phiCPU[index])
+			file:write(i,'\t',j,'\t',k,'\t',rhoCPU[index],'\t',phiCPU[index],'\n')
 			index = index + 1
 		end
 	end
 end
+file:close()

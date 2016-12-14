@@ -16,40 +16,42 @@ env:kernel{argsOut={phi, rho}, body=[[
 ]]}()
 
 -- jacobi
-local iter = env:kernel{argsOut={phi}, argsIn={rho}, body=require 'template'([[
-	const real4 dx = (real4)(1,1,1,1);
-	
-	real skewSum = 0;
-	<? for i=0,gridDim-1 do ?>{	
-		int4 iL = i;
-		iL.s<?=i?> = max(i.s<?=i?> - 1, 0);
-		int indexL = indexForInt4(iL);
-		real phiL = phi[indexL];
-		
-		int4 iR = i;
-		iR.s<?=i?> = min(i.s<?=i?> + 1, size.s<?=i?> - 1);
-		int indexR = indexForInt4(iR);
-		real phiR = phi[indexR];
-		
-		skewSum += (phiR + phiL) / (dx.s<?=i?> * dx.s<?=i?>);
-	}<? end ?>
+local iter = env:kernel{
+	argsOut = {phi},
+	argsIn = {rho},
+	body=require 'template'([[
+	const real4 dx = (real4)(<?=clnumber(1/tonumber(size.x))?>, <?=clnumber(1/tonumber(size.y))?>, <?=clnumber(1/tonumber(size.z))?>, 1);
+	if (i.x == 0 || i.x >= size.x-1 ||
+		i.y == 0 || i.y >= size.y-1 ||
+		i.z == 0 || i.z >= size.z-1)
+	{
+		phi[index] = 0.;
+	} else {
 
-	const real diag = -2. * (0
-<? for i=0,gridDim-1 do ?>
+		real skewSum = 0;
+		<? for i=0,dim-1 do ?>
+			 + (phi[index - stepsize.s<?=i?>] + phi[index + stepsize.s<?=i?>]) / (dx.s<?=i?> * dx.s<?=i?>)
+		<? end ?>;
+
+		const real diag = -2. * (0
+<? for i=0,dim-1 do ?>
 		+ 1. / (dx.s<?=i?> * dx.s<?=i?>)
 <? end ?>
-	);
-
-	phi[index] = (rho[index] - skewSum) / diag;
+		);
+		
+		phi[index] = (rho[index] - skewSum) / diag;
+	}
 ]], {
-	gridDim = env.gridDim,
-	gridSize = env.size,
+	clnumber = require 'cl.obj.number',
+	dim = env.dim,
+	size = env.size,
 })}
 
 for i=1,100 do
 	iter()
 end
 
+print'writing results...'
 local file = assert(io.open('out.txt', 'wb'))
 file:write('#x y z rho phi\n')
 local rhoCPU = rho:toCPU()
@@ -64,3 +66,4 @@ for i=0,size[1]-1 do
 	end
 end
 file:close()
+print'done!'

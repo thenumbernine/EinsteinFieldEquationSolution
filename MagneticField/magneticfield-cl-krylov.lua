@@ -9,7 +9,7 @@ just like in LinearSolvers.ConjugateGradient, except with favor towards reusing 
 		applies the linear function of A
 		reads from x vector, writes to y vector
 	b = object to hold 'b' vector
-	x = object to hold 'x' vector
+	x (optional) = object to hold 'x' vector.  initialized to 'b' if not provided.
 	MInv = (optional) function(y,x) for x ro and y rw vectors. preconditioner
 	errorCallback (optional) returns true to stop
 	epsilon (optional)
@@ -25,7 +25,6 @@ just like in LinearSolvers.ConjugateGradient, except with favor towards reusing 
 local function conjgradCL(args)
 	local A = assert(args.A)
 	local b = assert(args.b)
-	local x = assert(args.x)
 	
 	local MInv = args.MInv
 	local errorCallback = args.errorCallback
@@ -37,6 +36,12 @@ local function conjgradCL(args)
 	local free = args.free
 	local dot = assert(args.dot)
 	local mulAdd = assert(args.mulAdd)
+
+	local x = args.x
+	if not x then
+		x = new()
+		copy(x, b)
+	end
 
 	local r = new()
 	local p = new()
@@ -90,7 +95,6 @@ end
 local function conjresCL(args)
 	local A = assert(args.A)
 	local b = assert(args.b)
-	local x = assert(args.x)
 
 	local MInv = args.MInv
 	local errorCallback = args.errorCallback
@@ -103,6 +107,12 @@ local function conjresCL(args)
 	local dot = assert(args.dot)
 	local mulAdd = assert(args.mulAdd)
 
+	local x = args.x
+	if not x then
+		x = new()
+		copy(x, b)
+	end
+
 	local r = new()
 	local p = new()
 	local Ap = new()
@@ -114,9 +124,7 @@ local function conjresCL(args)
 
 	A(r, x)
 	mulAdd(r, b, r, -1)
-	
 	if MInv then MInv(r, r) end
-	local rDotMInvR = dot(r, r)
 
 	repeat
 		local err = dot(r, r) / bNorm
@@ -139,7 +147,7 @@ local function conjresCL(args)
 		
 			A(Ar, r)
 			local nrAr = dot(r, Ar)
-			local beta = nrAr
+			local beta = nrAr / rAr
 
 			rAr = nrAr
 			mulAdd(p, r, p, beta)
@@ -212,7 +220,7 @@ local A = program:kernel{
 					);
 	}
 ]], {
-	gridDim = env.gridDim,
+	dim = env.dim,
 	gridSize = env.size,
 })}
 
@@ -238,8 +246,8 @@ local dot = env:reduce{
 
 init()
 
-conjgradCL
---conjresCL	-- not working yet
+--conjgradCL
+conjresCL
 {
 	A = function(y, x) A(y.buf, x.buf) end,
 	b = rho,

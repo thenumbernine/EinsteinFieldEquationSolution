@@ -14,7 +14,7 @@ local rho = matrix.lambda(n, function(i,j,k)
 		and math.abs(j - (n[2]+1)/2) < 1
 		and math.abs(k - (n[3]+1)/2) < 1)
 		and (
-			i >= (n[1]+1)/2 and M or -M
+			i >= (n[1]+1)/2 and -M or M
 		) or 0
 end)
 

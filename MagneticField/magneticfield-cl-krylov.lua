@@ -185,7 +185,7 @@ local init = program:kernel{
 				&& abs(i.y - size.y/2) < 1
 				&& abs(i.z - size.z/2) < 1
 				? (
-					i.x >= size.x/2 ? M : -M
+					i.x >= size.x/2 ? -M : M
 				) : 0;
 	phi[index] = -rho[index];
 ]],
@@ -239,14 +239,18 @@ local dot = env:reduce{
 init()
 
 conjgradCL
---conjresCL
+--conjresCL	-- not working yet
 {
 	A = function(y, x) A(y.buf, x.buf) end,
 	b = rho,
 	x = phi,
 	maxiter = env.volume,
 	new = function() return env:buffer() end,
-	free = function(buffer) buffer.buf:release() end,
+	
+	-- hmm, this release, coupled with the __gc's release, makes things crash ...
+	-- at least I know the __gc is cleaning up correctly
+	--free = function(buffer) buffer.buf:release() end,
+	
 	copy = function(dst, src) 
 		env.cmds:enqueueCopyBuffer{
 			src = src.buf,
@@ -267,25 +271,22 @@ conjgradCL
 	end,
 }
 
-print'copying to cpu...'
+print'writing results...'
 local rhoCPU = rho:toCPU()
 local phiCPU = phi:toCPU()
-print'writing results...'
 local file = assert(io.open('out.txt', 'wb'))
 file:write('#x y z rho phi\n')
 local index = 0
 for i=0,tonumber(env.size.x)-1 do
 	for j=0,tonumber(env.size.y)-1 do
 		for k=0,tonumber(env.size.z)-1 do
-			local line = tostring(i)..'\t'..
-				tostring(j)..'\t'..
-				tostring(k)..'\t'..
-				tostring(rhoCPU[index])..'\t'..
-				tostring(phiCPU[index])..'\n'
+			local line = tostring(i)
+				..'\t'..tostring(j)
+				..'\t'..tostring(k)
+				..'\t'..tostring(rhoCPU[index])
+				..'\t'..tostring(phiCPU[index])
+				..'\n'
 			file:write(line)
-			file:flush()
-			io.write(line)
-			io:flush()
 			index = index + 1
 		end
 	end

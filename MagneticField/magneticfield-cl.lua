@@ -60,7 +60,7 @@ local iter = env:kernel{
 	argsOut = {phi},
 	argsIn = {rho},
 	body=require 'template'([[
-#if 0	
+#if 1	//set boundary to zero?	
 	if (i.x == 0 || i.x >= size.x-1 ||
 		i.y == 0 || i.y >= size.y-1 ||
 		i.z == 0 || i.z >= size.z-1)
@@ -73,11 +73,11 @@ local iter = env:kernel{
 	<? for i=0,dim-1 do ?>{
 		int4 iL = i;
 		iL.s<?=i?> = max(0, iL.s<?=i?>-1);
-		int indexL = indexForInt4ForSize(iL,<?=size?>);
+		int indexL = indexForInt4(iL);
 
 		int4 iR = i;
 		iR.s<?=i?> = min(<?=tonumber(size:ptr()[i]-1)?>, iR.s<?=i?>+1);
-		int indexR = indexForInt4ForSize(iR,<?=size?>);
+		int indexR = indexForInt4(iR);
 
 		skewSum += (phi[indexL] + phi[indexR]) * <?=1 / (dx:ptr()[i] * dx:ptr()[i])?>;
 	}<? end ?>

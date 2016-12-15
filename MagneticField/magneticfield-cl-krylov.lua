@@ -1,7 +1,8 @@
 #!/usr/bin/env luajit
 
-local template = require 'template'
 local ffi = require 'ffi'
+local template = require 'template'
+local vec3d = require 'ffi.vec.vec3d'
 
 local c = 299792458
 local G = 6.67408e-11
@@ -18,18 +19,24 @@ local env = require 'cl.obj.env'{size={n,n,n}}
 local JU_CPU = ffi.new('real4[?]', env.domain.volume)
 local AU_CPU = ffi.new('real4[?]', env.domain.volume)
 
-for i=0,env.domain.volume do
+for i=0,env.domain.volume-1 do
 	for j=0,3 do
 		JU_CPU[i].s[j] = 0
 	end
 end
 
-local vec3d = require 'ffi.vec.vec3d'
 local xmin = vec3d(-1, -1, -1)
 local xmax = vec3d(1, 1, 1)
-local dx = (xmax - xmin) / env.domain.size
+local dx = (xmax - xmin) / vec3d(env.domain.size:unpack())
 	
 do	--lazy rasterization
+	local q = 1							-- Coulombs (C)
+	q = q * math.sqrt(ke * G) / (c * c)	-- ...times Columbs to meters (m)
+	q = q * dx:volume()					-- ... per meter cubed (1/m^2)
+		
+	local I = q		-- amps (C / s) => 1/(m^2 s)
+	I = I * c		-- (1/m^3)
+
 	local divs = 8 * n
 	for i=0,divs-1 do
 		local frac = i / divs
@@ -38,70 +45,66 @@ do	--lazy rasterization
 		local y = math.floor(.5 * tonumber(env.domain.size.y) + .25 * n * math.sin(th))
 		local z = math.floor(.5 * tonumber(env.domain.size.z)) 
 	
-		local q = 1							-- Coulombs (C)
-		q = q * math.sqrt(ke * G) / (c * c)	-- ...times Columbs to meters (m)
-		q = q * dx:volume()					-- ... per meter cubed (1/m^2)
+		local index = tonumber(x+env.domain.size.x*(y+env.domain.size.y*z))
 
-		local index = x+env.domain.size.x*(y+env.domain.size.y+z)
-		JU_CPU[index].s0 = q
-		
-		local I = q		-- amps (C / s) => 1/(m^2 s)
-		I = I * c		-- (1/m^3)
-		
+		JU_CPU[index].s0 = q		
+	
 		JU_CPU[index].s1 = -I * math.sin(th)
 		JU_CPU[index].s2 = I * math.cos(th)
 		JU_CPU[index].s3 = 0
 	end
 end
 
-for i=0,env.domain.volume do
+for i=0,env.domain.volume-1 do
 	for j=0,3 do
 		AU_CPU[i].s[j] = -JU_CPU[i].s[j]
 	end
 end
 
+print('creating AU and JU...')
 local JU = env:buffer{name='JU', type='real4', data=JU_CPU}
 local AU = env:buffer{name='AU', type='real4', data=AU_CPU}
 
+print('building A...')
 local A = env:kernel{
 	argsOut = {JU},
 	argsIn = {AU},
 	body = template([[	
-#if 0	//set boundary to zero?	
+#if 1	//set boundary to zero?	
 	if (i.x == 0 || i.x >= size.x-1 ||
 		i.y == 0 || i.y >= size.y-1 ||
 		i.z == 0 || i.z >= size.z-1)
 	{
-		JU[index] = 0;	//boundary conditions
+		JU[index] = (real4)(0,0,0,0);	//boundary conditions
 		return;
 	} 
 #endif
-
-	const real4 dx = (real4)(<?=clnumber(dx.x)?>, <?=clnumber(dx.y)?>, <?=clnumber(dx.z)?>, 1);
-	
-	real4 sum = - AU[index] * 2. * (
+	real4 sum = AU[index] * <?= -2. * (
 		1. / (dx.x * dx.x)
 		+ 1. / (dx.y * dx.y)
 		+ 1. / (dx.z * dx.z)
-	);
+	)?>;
 	<? for k=0,dim-1 do ?>{
 		int4 iL = i;
 		iL.s<?=k?> = max(0, iL.s<?=k?>-1);
 		int indexL = indexForInt4(iL);
 
 		int4 iR = i;
-		iR.s<?=k?> = min(<?=tonumber(size:ptr()[k]-1)?>, iL.s<?=k?>+1);
+		iR.s<?=k?> = min(<?=tonumber(size:ptr()[k]-1)?>, iR.s<?=k?>+1);
 		int indexR = indexForInt4(iR);
 
-		sum += (AU[indexR] + AU[indexL]) / (dx.s<?=k?> * dx.s<?=k?>);
+		sum += (AU[indexR] + AU[indexL]) * <?=1 / (dx:ptr()[k] * dx:ptr()[k])?>;
 	}<? end ?>
 
 	JU[index] = sum;
 ]], {
 	dx = dx,
+	size = env.domain.size,
+	dim = env.domain.dim,
 	clnumber = require 'cl.obj.number',
 })}
 
+print'solving...'
 local solver = 
 --require 'LinearSolvers.cl.conjgrad'
 require 'LinearSolvers.cl.conjres'	-- took 0.768707s to solve within 1e-7
@@ -112,12 +115,12 @@ require 'LinearSolvers.cl.conjres'	-- took 0.768707s to solve within 1e-7
 	x = AU,
 	epsilon = 1e-7,
 
-	-- hmm, for buffers of vector types,
-	-- I need sizes not equal to the env volume (i.e. factors of it)
-	-- and that means overriding 'n' here (for the buffer allocation)
-	-- and that also means overriding 'size' for the buffer allocation
 	type = 'real',
-	size = env.volume * 4,
+	size = env.domain.volume * 4,
+	errorCallback = function(err,iter)
+		io.stderr:write(tostring(err)..'\t'..tostring(iter)..'\n')
+		assert(err == err)
+	end,
 }
 
 local beginTime = os.clock()
@@ -129,14 +132,21 @@ print'writing results...'
 JU:toCPU(JU_CPU)
 AU:toCPU(AU_CPU)
 local file = assert(io.open('out.txt', 'wb'))
-file:write('#x y z JU AU\n')
+file:write('#x y z J^t J^x J^y J^z A^t A^x A^y A^z\n')
 local index = 0
-for i=0,tonumber(env.domain.size.x)-1 do
+for k=0,tonumber(env.domain.size.z)-1 do
 	for j=0,tonumber(env.domain.size.y)-1 do
-		for k=0,tonumber(env.domain.size.z)-1 do
+		for i=0,tonumber(env.domain.size.x)-1 do
 			file:write(i,'\t',j,'\t',k,
-				'\t',JU_CPU[index],
-				'\t',AU_CPU[index],'\n')
+				'\t',JU_CPU[index].s0,
+				'\t',JU_CPU[index].s1,
+				'\t',JU_CPU[index].s2,
+				'\t',JU_CPU[index].s3,
+				'\t',AU_CPU[index].s0,
+				'\t',AU_CPU[index].s1,
+				'\t',AU_CPU[index].s2,
+				'\t',AU_CPU[index].s3,
+				'\n')
 			index = index + 1
 		end
 	end

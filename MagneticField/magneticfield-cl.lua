@@ -1,7 +1,5 @@
 #!/usr/bin/env luajit
--- TODO put this in EinsteinFieldEquation/MagneticField or something?  this doesn't use LinearSolvers just yet
--- TODO use a linear solver?
--- ye olde poisson problem
+-- Poisson problem solved with Jacobi method
 -- A x = y, y = rho, x = phi, A = del^2
 
 local ffi = require 'ffi'
@@ -104,8 +102,8 @@ end
 print'writing results...'
 local file = assert(io.open('out.txt', 'wb'))
 file:write('#x y z rho phi\n')
-local rhoCPU = rho:toCPU()
-local phiCPU = phi:toCPU()
+rho:toCPU(rhoCPU)
+phi:toCPU(phiCPU)
 local index = 0
 for k=0,size[3]-1 do
 	for j=0,size[2]-1 do

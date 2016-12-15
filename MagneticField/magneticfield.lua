@@ -4,19 +4,42 @@ local conjgrad = require 'LinearSolvers.ConjugateGradient'
 local conjres = require 'LinearSolvers.ConjugateResidual'
 local gmres = require 'LinearSolvers.GeneralizedMinimalResidual'
 local matrix = require 'matrix'
+local vec3 = require 'vec.vec3'
+local table = require 'ext.table'
 
 local n = {ni,ni,ni}
 local h2 = 1/ni^2
 
-local M = 1e+6
-local rho = matrix.lambda(n, function(i,j,k)
-	return (math.abs(i - (n[1]+1)/2) < 1
-		and math.abs(j - (n[2]+1)/2) < 1
-		and math.abs(k - (n[3]+1)/2) < 1)
-		and (
-			i >= (n[1]+1)/2 and -M or M
-		) or 0
-end)
+local c = 299792458
+local G = 6.67408e-11
+local ke = 8.9875517873681764e+9	-- = 1 / (4 pi epsilon0)
+local hBar = 1.05457180013e-34
+local kB = 1.3806488e-23
+local e = 6.2415093414e+18
+
+local xmin = vec3(-1, -1, -1)
+local xmax = vec3(1, 1, 1)
+local dx = vec3()
+for i=1,3 do
+	dx[i] = (xmax[i] - xmin[i]) / n[i]
+end
+	
+local rho = matrix.zeros(table.unpack(n))
+do	--lazy rasterization
+	local q = 1							-- Coulombs (C)
+	q = q * math.sqrt(ke * G) / (c * c)	-- ...times Columbs to meters (m)
+	q = q * dx[1] * dx[2] * dx[3]					-- ... per meter cubed (1/m^2)
+	local divs = 8 * ni
+	for i=0,divs-1 do
+		local frac = i / divs
+		local th = 2 * math.pi * frac
+		local x = math.floor(.5 * n[1] + .25 * ni * math.cos(th))
+		local y = math.floor(.5 * n[2] + .25 * ni * math.sin(th))
+		local z = math.floor(.5 * n[3]) 
+
+		rho[x+1][y+1][z+1] = q
+	end
+end
 
 local phi = 
 conjgrad
@@ -46,7 +69,7 @@ conjgrad
 	clone = matrix,
 	dot = matrix.dot,
 	errorCallback = function(err,iter)
-		io.stderr:write(tostring(err)..'\t'..tostring(iter)..'\n')
+		print(err,iter)
 	end,
 	epsilon = 1e-5,
 	maxiter = ni^3,
@@ -55,9 +78,9 @@ conjgrad
 
 local file = assert(io.open('out.txt', 'wb'))
 file:write('#x y z rho phi\n')
-for i=1,n[1] do
+for k=1,n[3] do
 	for j=1,n[2] do
-		for k=1,n[3] do
+		for i=1,n[1] do
 			file:write(i-1,'\t',j-1,'\t',k-1,'\t',rho[i][j][k],'\t',phi[i][j][k],'\n')
 		end
 	end

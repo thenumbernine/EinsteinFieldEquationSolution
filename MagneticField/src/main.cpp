@@ -1,13 +1,14 @@
 #include <iostream>
 #include "Parallel/Parallel.h"
 #include "Tensor/Grid.h"
+#include "Solvers/ConjRes.h"
 #include "Solvers/GMRes.h"
 #include "Common/Macros.h"
 
 Parallel::Parallel parallel(8);
 
 const int gridDim = 3;
-const int dim = 4;
+const int stDim = 4;
 
 typedef double real;
 using namespace Tensor;
@@ -115,6 +116,16 @@ A^a;u_;u = A^a;u_,u + Gamma^a_bu A^b;u + Gamma^u_bu A^a;b
 
 */
 
+void time(const std::string name, std::function<void()> f) {
+	std::cout << name << " ... ";
+	std::cout.flush();
+	auto start = std::chrono::high_resolution_clock::now();
+	f();
+	auto end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> diff = end - start;
+	std::cout << "(" << diff.count() << "s)" << std::endl;
+}
+
 int main() {
 	size_t n = 64;
 	Vector<int, gridDim> size;
@@ -124,8 +135,8 @@ int main() {
 	Vector<real, gridDim> xmin(-1,-1,-1);
 	Vector<real, gridDim> xmax(1,1,1);
 	Vector<real, gridDim> dx = (xmax - xmin) / (Vector<real,gridDim>)size;
-	Grid<Vector<real, dim>, gridDim> JU(size);
-	Grid<Vector<real, dim>, gridDim> AU(size);
+	Grid<Vector<real, stDim>, gridDim> JU(size);
+	Grid<Vector<real, stDim>, gridDim> AU(size);
 
 	//solve for AU
 	RangeObj<gridDim> range = JU.range();
@@ -171,8 +182,8 @@ int main() {
 	});
 
 	Solvers::Krylov<real>::Func A = [&](real* JU_, const real* AU_) {
-		Grid<Vector<real, dim>, gridDim> JU(size, (Vector<real,dim>*)JU_);
-		Grid<const Vector<real, dim>, gridDim> AU(size, (const Vector<real,dim>*)AU_);
+		Grid<Vector<real, stDim>, gridDim> JU(size, (Vector<real,stDim>*)JU_);
+		Grid<const Vector<real, stDim>, gridDim> AU(size, (const Vector<real,stDim>*)AU_);
 
 		//(ln sqrt|g|),a = Gamma^b_ab
 
@@ -196,28 +207,48 @@ int main() {
 
 		//solve for del A^i = J^i
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, gridDim>& index) {
-			Vector<real, dim> sum = AU(index) * (-2. * (real)gridDim);
+#if 0	//set boundary to zero?
+			for (int k = 0; k < gridDim; ++k) {
+				if (index(k) == 0 || index(k) == (int)n-1) {
+					//set boundary to zero:
+					JU(index) = Vector<real, stDim>();
+					return;
+				}
+			}
+#endif
+			
+			Vector<real, stDim> sum = AU(index) * (-2. * (
+				1. / (dx(0) * dx(0))
+				+ 1. / (dx(1) * dx(1))
+				+ 1. / (dx(2) * dx(2))
+			));
 			for (int k = 0; k < gridDim; ++k) {
 				Vector<int, gridDim> ip = index;
 				ip(k) = std::min<int>(ip(k)+1, n-1);
 				Vector<int, gridDim> im = index;
 				im(k) = std::max<int>(im(k)-1, 0);
-				sum += AU(ip) + AU(im);
+				sum += (AU(ip) + AU(im)) / (dx(k) * dx(k));
 			}
-			JU(index) = sum / dx.volume();
+			JU(index) = sum;
 		});
 	};
 
-	int volume = size.volume() * dim;
-	Solvers::GMRes<real> solver(volume, (real*)AU.v, (const real*)JU.v, A, 2e-2, volume, 100);
+	int volume = size.volume() * stDim;
+	
+	//ConjRes took 0.0491484s to solve within 1e-7
+	Solvers::ConjRes<real> solver(volume, (real*)AU.v, (const real*)JU.v, A, 1e-7, volume);
+
+	//GMRes took 0.507793s to solve within 1e-7 with a restart of 100
+	//Solvers::GMRes<real> solver(volume, (real*)AU.v, (const real*)JU.v, A, 1e-7, volume, 100);
 	
 	solver.stopCallback = [&]()->bool{
 		std::cerr << solver.getResidual() << "\t" << solver.getIter() << std::endl;
 		return false;
 	};
 
-	solver.solve();
-
+	time("solve", [&](){
+		solver.solve();
+	});
 
 	//calculate E and B
 	Grid<Vector<real, 3>, gridDim> E(size), B(size);
@@ -225,13 +256,13 @@ int main() {
 	//E^i = -grad phi - d/dt A
 	//B^i = curl A
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, gridDim>& index) {
-		real dAU[gridDim][dim];
+		real dAU[gridDim][stDim];
 		for (int i = 0; i < gridDim; ++i) {
 			Vector<int, gridDim> ip = index;
 			ip(i) = std::min<int>(ip(i)+1, n-1);
 			Vector<int, gridDim> im = index;
 			im(i) = std::max<int>(im(i)-1, 0);
-			for (int u = 0; u < dim; ++u) {
+			for (int u = 0; u < stDim; ++u) {
 				dAU[i][u] = (AU(ip)(u) - AU(im)(u)) / (2. * dx(i));	//... TODO - d/dt AU
 			}
 		}
@@ -243,10 +274,10 @@ int main() {
 		}
 	});
 
-	//hmm, TODO if dim < 4 then xyz else txyz
+	//hmm, TODO if stDim < 4 then xyz else txyz
 	const char* xs[] = {"t", "x", "y", "z"};
 	assert(numberof(xs) >= gridDim);
-	assert(numberof(xs) >= dim);
+	assert(numberof(xs) >= stDim);
 	
 	struct Col {
 		std::string name;
@@ -258,13 +289,13 @@ int main() {
 		{"iy", [&](Vector<int,gridDim> index)->real{ return index(1); }},
 		{"iz", [&](Vector<int,gridDim> index)->real{ return index(2); }},
 	};
-	for (int i = 0; i < dim; ++i) {
+	for (int i = 0; i < stDim; ++i) {
 		cols.push_back(Col(
 			std::string("A^") + std::string(xs[i]),
 			[&,i](Vector<int,gridDim> index)->real{ return AU(index)(i); }
 		));
 	}
-	for (int i = 0; i < dim; ++i) {
+	for (int i = 0; i < stDim; ++i) {
 		cols.push_back(Col(
 			std::string("J^") + std::string(xs[i]),
 			[&,i](Vector<int,gridDim> index)->real{ return JU(index)(i); }

@@ -528,8 +528,8 @@ assert(dGammaULLL(a,b,c,i+1) == dGammaULLL(a,b,c,i+1));
 		}
 	}
 	
-#if 0	//calculate the Riemann, then the Ricci
 	const TensorUSL &GammaULL = GammaULLs(index);
+#if 0	//calculate the Riemann, then the Ricci
 	TensorULLL GammaSqULLL;
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b < dim; ++b) {
@@ -1349,7 +1349,7 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 		std::shared_ptr<GMRes> gmres = std::dynamic_pointer_cast<GMRes>(jfnk.getLinearSolver());
 		real lastResidual;
 		gmres->stopCallback = [&]()->bool{
-			if (gmres->getIter() > jfnk.getN()) {
+			if (gmres->getIter() > (int)jfnk.getN()) {
 				if (gmres->getResidual() == lastResidual) {
 					std::cout << "gmres stuck -- aborting gmres" << std::endl;
 					return true;

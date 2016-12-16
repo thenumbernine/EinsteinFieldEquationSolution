@@ -113,13 +113,11 @@ require 'LinearSolvers.cl.conjres'	-- took 0.768707s to solve within 1e-7
 	A = A,
 	b = JU,
 	x = AU,
-	epsilon = 1e-7,
 
 	type = 'real',
 	size = env.domain.volume * 4,
 	errorCallback = function(err,iter)
 		io.stderr:write(tostring(err)..'\t'..tostring(iter)..'\n')
-		assert(err == err)
 	end,
 }
 

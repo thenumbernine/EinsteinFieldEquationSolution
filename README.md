@@ -67,6 +67,7 @@ Some thoughts on results ...
 
 Here are the variable ranges, initializing the stress-energy prims with the earth, intiializing the metric prims with a flat metric:
 
+```
 after 0 iterations:
 #	ix	iy	iz	rho	det-1	alpha-1	gravity	analyticalGravity	EFE_tt(g/cm^3)	EFE_ti	EFE_ij	G_ab
 min	0	0	0	0	0	0	0	0.93126130172052	-5.5147098661213	0	0	0
@@ -76,4 +77,4 @@ after 1 iterations of jfnk
 #	ix	iy	iz	rho	det-1	alpha-1	gravity	analyticalGravity	EFE_tt(g/cm^3)	EFE_ti	EFE_ij	G_ab
 min	0	0	0	0	-0.57528624373743	-0.2483215332056	-1.2855936147291	0.93126130172052	-2.9155846148211	5.6376265101891e-25	5.7454085369078e-27	6.8400743120253e-27
 max	15	15	15	4.0950296770075e-24	-0.57528624373725	-0.24832153320289	1.3218539855677	9.4304273489865	1.220838980645	4.1759391983984e-21	3.1036763335186e-23	3.8474511176799e-23
-
+```

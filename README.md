@@ -65,7 +65,7 @@ Kerr metric increase in acceleration due to faster rotation.
 
 Some thoughts on results ...
 
-Here are the variable ranges, initializing the stress-energy prims with the earth, intiializing the metric prims with a flat metric:
+Here are the variable ranges, initializing the stress-energy prims with the earth, initializing the metric prims with a flat metric:
 
 ```
 after 0 iterations:

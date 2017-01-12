@@ -1,6 +1,7 @@
 #include <iostream>
 #include "Parallel/Parallel.h"
 #include "Tensor/Grid.h"
+#include "Solvers/ConjGrad.h"
 #include "Solvers/ConjRes.h"
 #include "Solvers/GMRes.h"
 #include "Common/Macros.h"
@@ -155,6 +156,14 @@ int main() {
 #endif
 	
 	//lazy rasterization
+	real q = 1;	//Coulombs (C)
+	q *= sqrt(ke * G) / (c * c);	//...times Columbs to meters (m)
+	q *= dx.volume();	// ... per meter cubed (1/m^2)
+//q = 1e-22 for n=64 (dx=.03125)
+//that might be too small for the solvers...
+q = 1;
+std::cout << "q: " << q << std::endl;
+	
 	int divs = 8 * (int)n;
 	for (int i = 0; i < divs; ++i) {
 		real frac = (real)i / (real)divs;
@@ -162,10 +171,6 @@ int main() {
 		int x = .5 * size(0) + .25 * n * cos(th);
 		int y = .5 * size(1) + .25 * n * sin(th);
 		int z = .5 * size(2);
-	
-		real q = 1;	//Coulombs (C)
-		q *= sqrt(ke * G) / (c * c);	//...times Columbs to meters (m)
-		q *= dx.volume();	// ... per meter cubed (1/m^2)
 		
 		JU(x,y,z)(0) = q;
 		
@@ -234,12 +239,20 @@ int main() {
 	};
 
 	int volume = size.volume() * stDim;
+
+//hmm, some problems:
+//ConjGrad is segfaulting
+//ConjRes and GMRes stop immediately if q=1e-22
+//both of them bottom-out at .0002 if q=1
+//...and the Lua implementations of these works fine, but slower...
+
+	//Solvers::ConjGrad<real> solver(volume, (real*)AU.v, (const real*)JU.v, A, 1e-5, volume);
 	
 	//ConjRes took 0.0491484s to solve within 1e-7
-	Solvers::ConjRes<real> solver(volume, (real*)AU.v, (const real*)JU.v, A, 1e-7, volume);
+	Solvers::ConjRes<real> solver(volume, (real*)AU.v, (const real*)JU.v, A, 1e-5, volume);
 
 	//GMRes took 0.507793s to solve within 1e-7 with a restart of 100
-	//Solvers::GMRes<real> solver(volume, (real*)AU.v, (const real*)JU.v, A, 1e-7, volume, 100);
+	//Solvers::GMRes<real> solver(volume, (real*)AU.v, (const real*)JU.v, A, 1e-5, volume, 100);
 	
 	solver.stopCallback = [&]()->bool{
 		std::cerr << solver.getResidual() << "\t" << solver.getIter() << std::endl;

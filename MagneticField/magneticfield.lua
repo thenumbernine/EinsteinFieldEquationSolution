@@ -43,8 +43,8 @@ end
 
 local phi = 
 --conjgrad
-conjres
---gmres
+--conjres
+gmres
 {
 	x = -rho,
 	b = rho,

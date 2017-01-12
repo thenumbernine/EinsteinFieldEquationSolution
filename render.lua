@@ -41,12 +41,16 @@ local colnames
 local clipEnabled = ffi.new('bool[1]', true)
 local rotateClip = ffi.new('int[1]', 0)
 
-local clipInfos = range(4):map(function(i)
+local function makeDefaultPlane(i)
 	local plane = vec4(0,0,0,0)
 	plane[math.min(i,3)] = -1
+	return plane
+end
+
+local clipInfos = range(4):map(function(i)
 	return {
 		enabled = ffi.new('bool[1]', i==3),
-		plane = plane,
+		plane = makeDefaultPlane(i),
 	}
 end)
 
@@ -54,7 +58,7 @@ local alpha = ffi.new('float[1]', 1.5e-1)
 local alphaGamma = ffi.new('float[1]', 1)
 local showGradTrace = ffi.new('bool[1]', false)
 local showCurlTrace = ffi.new('bool[1]', false)
-
+local flipGradient = ffi.new('bool[1]', false)
 
 local App = class(ImGuiApp)
 
@@ -193,6 +197,7 @@ uniform vec3 normal;
 uniform float alpha;
 uniform float alphaGamma;
 uniform bool clipEnabled[4];
+uniform bool flipGradient;
 void main() {
 
 	vec4 worldPos = gl_ModelViewMatrix * vec4(pos,1.);
@@ -201,7 +206,10 @@ void main() {
 	}
 
 	float value = texture3D(volTex, pos).r;
-	vec4 voxelColor = vec4(texture2D(hsvTex, vec2(value, .5)).rgb, pow(alpha, alphaGamma));
+	if (flipGradient) value = 1. - value;
+	vec3 texColor = texture2D(hsvTex, vec2(value, .5)).rgb;
+	float voxelAlpha = pow(alpha, alphaGamma);
+	vec4 voxelColor = vec4(texColor, voxelAlpha);
 	
 	//calculate normal in screen coordinates
 	vec4 n = gl_ModelViewProjectionMatrix * vec4(normal, 0.);
@@ -217,7 +225,8 @@ void main() {
 			'normal',
 			'alpha',
 			'alphaGamma',
-			'clipEnabled'
+			'clipEnabled',
+			'flipGradient',
 		},
 	}
 	volumeShader:use()
@@ -322,6 +331,7 @@ function App:update()
 	gl.glUniform1f(volumeShader.uniforms.alphaGamma, alphaGamma[0])
 	gl.glUniform1iv(volumeShader.uniforms.clipEnabled, 4, 
 		ffi.new('int[4]', clipInfos:map(function(info) return info.enabled[0] end)))
+	gl.glUniform1i(volumeShader.uniforms.flipGradient, flipGradient[0]) 
 
 	gl.glEnable(gl.GL_TEXTURE_GEN_S)
 	gl.glEnable(gl.GL_TEXTURE_GEN_T)
@@ -539,7 +549,9 @@ function App:updateGUI()
 	local gradImageSize = ig.ImVec2(128, 32)
 	ig.igImage(
 		ffi.cast('void*',ffi.cast('intptr_t',hsvTex.id)),
-		gradImageSize)
+		gradImageSize,
+		ig.ImVec2(flipGradient[0] and 1 or 0,0),
+		ig.ImVec2(flipGradient[0] and 0 or 1,1))
 	local gradScreenPos = ig.igGetCursorScreenPos()
 	local mousePos = ig.igGetMousePos()
 	local cursorX = mousePos.x - gradScreenPos.x
@@ -555,12 +567,17 @@ function App:updateGUI()
 	
 	ig.igSliderFloat('alpha', alpha, 0, 1, '%.3e', 10)
 	ig.igSliderFloat('gamma', alphaGamma, 0, 1000, '%.3e', 10)
+	ig.igCheckbox('flip gradient', flipGradient)
 	ig.igRadioButton("rotate camera", rotateClip, 0)
 	for i,clipInfo in ipairs(clipInfos) do
 		ig.igPushIdStr('clip '..i)
 		ig.igCheckbox('clip', clipInfo.enabled)
 		ig.igSameLine()
 		ig.igRadioButton('rotate', rotateClip, i)
+		ig.igSameLine()
+		if ig.igButton('reset') then
+			clipInfo.plane = makeDefaultPlane(i)
+		end
 		ig.igPopId()
 	end
 	ig.igCheckbox('show gradient trace', showGradTrace)

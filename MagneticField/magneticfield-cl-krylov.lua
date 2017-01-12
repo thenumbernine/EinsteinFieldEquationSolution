@@ -107,7 +107,8 @@ local A = env:kernel{
 print'solving...'
 local solver = 
 --require 'LinearSolvers.cl.conjgrad'
-require 'LinearSolvers.cl.conjres'	-- took 0.768707s to solve within 1e-7
+--require 'LinearSolvers.cl.conjres'	-- took 0.768707s to solve within 1e-7
+require 'LinearSolvers.cl.gmres'
 {
 	env = env,
 	A = A,

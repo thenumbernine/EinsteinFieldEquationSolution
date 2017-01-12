@@ -42,8 +42,8 @@ do	--lazy rasterization
 end
 
 local phi = 
-conjgrad
---conjres
+--conjgrad
+conjres
 --gmres
 {
 	x = -rho,

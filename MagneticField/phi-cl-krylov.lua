@@ -94,8 +94,9 @@ local A = env:kernel{
 })}
 
 local solver = 
---require 'LinearSolvers.cl.conjgrad'
-require 'LinearSolvers.cl.conjres'	-- took 0.768707s to solve within 1e-7
+--require 'solver.cl.conjgrad'
+require 'solver.cl.conjres'	-- took 0.768707s to solve within 1e-7
+--require 'solver.cl.gmres'
 {
 	env = env,
 	A = A,

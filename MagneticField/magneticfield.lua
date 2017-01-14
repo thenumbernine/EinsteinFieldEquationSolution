@@ -1,11 +1,12 @@
 #!/usr/bin/env luajit
-local ni = ... and tonumber(...) or 16 --64
-local conjgrad = require 'LinearSolvers.ConjugateGradient'
-local conjres = require 'LinearSolvers.ConjugateResidual'
-local gmres = require 'LinearSolvers.GeneralizedMinimalResidual'
+
 local matrix = require 'matrix'
 local vec3 = require 'vec.vec3'
 local table = require 'ext.table'
+
+local ni, solverName = ...
+ni = (ni and assert(tonumber(ni), "failed to interpret size from "..tostring(ni))) or 16
+solverName = solverName or 'gmres'
 
 local n = {ni,ni,ni}
 local h2 = 1/ni^2
@@ -46,9 +47,11 @@ do	--lazy rasterization
 end
 
 local AU = 
---conjgrad
---conjres
-gmres
+assert( ({
+	conjgrad = require 'solver.conjgrad',
+	conjres = require 'solver.conjres',
+	gmres = require 'solver.gmres',
+})[solverName] )
 {
 	x = -JU,	-- initial AU
 	b = JU,

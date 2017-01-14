@@ -11,7 +11,10 @@ local hBar = 1.05457180013e-34
 local kB = 1.3806488e-23
 local e = 6.2415093414e+18
 
-local n = 64
+local n, solverName = ...
+n = (n and assert(tonumber(n), "failed to interpret size from "..tostring(n))) or 16
+solverName = solverName or 'gmres'
+
 local env = require 'cl.obj.env'{size={n,n,n}}
 
 -- init
@@ -34,7 +37,7 @@ do	--lazy rasterization
 	q = q * math.sqrt(ke * G) / (c * c)	-- ...times Columbs to meters (m)
 	q = q * dx:volume()					-- ... per meter cubed (1/m^2)
 	local I = q		-- amps (C / s) => 1/(m^2 s)
-	I = I * c		-- (1/m^3)
+	I = I * c		-- 1/m^3
 	local divs = 8 * n
 	for i=0,divs-1 do
 		local frac = i / divs
@@ -56,11 +59,9 @@ for i=0,env.domain.volume-1 do
 	end
 end
 
-print('creating AU and JU...')
 local JU = env:buffer{name='JU', type='real4', data=JU_CPU}
 local AU = env:buffer{name='AU', type='real4', data=AU_CPU}
 
-print('building A...')
 local A = env:kernel{
 	argsOut = {JU},
 	argsIn = {AU},
@@ -99,12 +100,7 @@ local A = env:kernel{
 	clnumber = require 'cl.obj.number',
 })}
 
-print'solving...'
-local solver = 
---require 'LinearSolvers.cl.conjgrad'
---require 'LinearSolvers.cl.conjres'	-- took 0.768707s to solve within 1e-7
-require 'LinearSolvers.cl.gmres'
-{
+local solver = require('solver.cl.'..solverName){
 	env = env,
 	A = A,
 	b = JU,
@@ -113,19 +109,19 @@ require 'LinearSolvers.cl.gmres'
 	type = 'real',
 	size = env.domain.volume * 4,
 	errorCallback = function(err,iter)
-		io.stderr:write(tostring(err)..'\t'..tostring(iter)..'\n')
+		print(iter, err)
 	end,
 
-	epsilon = 4e-5,
-	restart = 10,
+	epsilon = 1e-5,
+	maxiter = env.domain.volume * 4,
+	restart = 100,
 }
 
 local beginTime = os.clock()
 solver()
 local endTime = os.clock()
-print('took '..(endTime - beginTime)..' seconds')
+io.stderr:write('took '..(endTime - beginTime)..' seconds\n')
 
-print'writing results...'
 JU:toCPU(JU_CPU)
 AU:toCPU(AU_CPU)
 local file = assert(io.open('out.txt', 'wb'))
@@ -149,4 +145,3 @@ for k=0,tonumber(env.domain.size.z)-1 do
 	end
 end
 file:close()
-print'done!'

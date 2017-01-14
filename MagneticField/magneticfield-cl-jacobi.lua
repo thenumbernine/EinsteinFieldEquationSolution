@@ -15,10 +15,10 @@ local n = 16	--64
 local size = {16,16,16}
 local env = require 'cl.obj.env'{size=size, verbose=true}
 
-local JU_CPU = ffi.new('real4[?]', env.domain.volume)
-local AU_CPU = ffi.new('real4[?]', env.domain.volume)
+local JU_CPU = ffi.new('real4[?]', env.base.volume)
+local AU_CPU = ffi.new('real4[?]', env.base.volume)
 
-for i=0,env.domain.volume-1 do
+for i=0,env.base.volume-1 do
 	for j=0,3 do
 		JU_CPU[i].s[j] = 0
 	end
@@ -27,7 +27,7 @@ end
 local vec3d = require 'ffi.vec.vec3d'
 local xmin = vec3d(-1, -1, -1)
 local xmax = vec3d(1, 1, 1)
-local dx = (xmax - xmin) / vec3d(env.domain.size:unpack())
+local dx = (xmax - xmin) / vec3d(env.base.size:unpack())
 	
 do	--lazy rasterization
 	local q = 1							-- Coulombs (C)
@@ -42,8 +42,8 @@ do	--lazy rasterization
 		local x = math.floor(.5 * size[1] + .25 * size[1] * math.cos(th))
 		local y = math.floor(.5 * size[2] + .25 * size[2] * math.sin(th))
 		local z = math.floor(.5 * size[3]) 
-		local index = x + env.domain.size.x * (y + env.domain.size.y * z)
-		assert(index >= 0 and index < env.domain.volume)
+		local index = x + env.base.size.x * (y + env.base.size.y * z)
+		assert(index >= 0 and index < env.base.volume)
 		JU_CPU[index].s0 = q
 		JU_CPU[index].s1 = -I * math.sin(th)
 		JU_CPU[index].s2 = I * math.cos(th)
@@ -51,7 +51,7 @@ do	--lazy rasterization
 	end
 end
 
-for i=0,env.domain.volume-1 do
+for i=0,env.base.volume-1 do
 	for j=0,3 do
 		AU_CPU[i].s[j] = -JU_CPU[i].s[j]
 	end
@@ -63,7 +63,6 @@ local AU = env:buffer{name='AU', type='real4', data=AU_CPU}
 -- [=[
 -- jacobi
 local iter = env:kernel{
-	domain = env.domain,
 	argsOut = {AU},
 	argsIn = {JU},
 	body=require 'template'([[
@@ -98,45 +97,49 @@ local invDiag = 1 / (-2 * diag)
 ?>	AU[index] = (JU[index] - skewSum) * <?=invDiag?>;
 ]], {
 	clnumber = require 'cl.obj.number',
-	dim = env.domain.dim,
-	size = env.domain.size,
+	dim = env.base.dim,
+	size = env.base.size,
 	dx = dx,
 })}
 
 local sumReduce = env:reduce{
-	size = env.domain.volume * 4,
+	size = env.base.volume * 4,
 	type = 'real',
 	op = function(x,y) return x..' + '..y end,
 }
 
 -- why does keeping the type real4 make a difference?!?!?!?!
 -- and why does it fail when I only allocate room for 1 result in the reduce object?
--- [=[
+--[=[
 local square = env:kernel{
-	argsOut = {{name='result', type='real', buf=sumReduce.buffer}},
-	argsIn = {{name='x', type='real', buf=AU.buf}},
-	domain = require 'cl.obj.domain'{env=env, size=env.domain.volume * 4},
+	argsOut = {{name='result', type='real', obj=sumReduce.buffer}},
+	argsIn = {{name='x', type='real', obj=AU.obj}},
+	domain = require 'cl.obj.domain'{env=env, size=env.base.volume * 4},
 	body = [[	real v = x[index];	result[index] = v * v;	]],
 }
 --]=]
---[=[
+-- [=[
 local square = env:kernel{
-	argsOut = {{name='result', type='real4', buf=sumReduce.buffer}},
-	argsIn = {{name='x', type='real4', buf=AU.buf}},
-	domain = env.domain.volume,
+	argsOut = {{name='result', type='real4', obj=sumReduce.buffer}},
+	argsIn = {{name='x', type='real4', obj=AU.obj}},
+	domain = env.base.volume,
 	body = [[	real4 v = x[index];	result[index] = v * v;	]],
 }
 --]=]
 square:compile()
-square.kernel:setArg(1, JU.buf)
+square.obj:setArg(1, JU.obj)
 square()
-square.kernel:setArg(1, AU.buf)
+square.obj:setArg(1, AU.obj)
 local JULen = math.sqrt(sumReduce())	
 
 -- TODO use a norm to find epsilon
 print('# iter err')
 for i=1,100 do
 	iter()
+	
+	-- TODO fix the error calculation
+	-- create a kernel for applying the discrete d'lambertian to AU 
+	-- subtract that value from JU to calculate the error
 	square()
 	local AULen = math.sqrt(sumReduce())
 	local err = AULen / JULen

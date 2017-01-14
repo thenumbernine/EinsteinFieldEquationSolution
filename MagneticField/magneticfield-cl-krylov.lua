@@ -19,10 +19,10 @@ local env = require 'cl.obj.env'{size={n,n,n}}
 
 -- init
 
-local JU_CPU = ffi.new('real4[?]', env.domain.volume)
-local AU_CPU = ffi.new('real4[?]', env.domain.volume)
+local JU_CPU = ffi.new('real4[?]', env.base.volume)
+local AU_CPU = ffi.new('real4[?]', env.base.volume)
 
-for i=0,env.domain.volume-1 do
+for i=0,env.base.volume-1 do
 	for j=0,3 do
 		JU_CPU[i].s[j] = 0
 	end
@@ -30,7 +30,7 @@ end
 
 local xmin = vec3d(-1, -1, -1)
 local xmax = vec3d(1, 1, 1)
-local dx = (xmax - xmin) / vec3d(env.domain.size:unpack())
+local dx = (xmax - xmin) / vec3d(env.base.size:unpack())
 	
 do	--lazy rasterization
 	local q = 1							-- Coulombs (C)
@@ -42,10 +42,10 @@ do	--lazy rasterization
 	for i=0,divs-1 do
 		local frac = i / divs
 		local th = 2 * math.pi * frac
-		local x = math.floor(.5 * tonumber(env.domain.size.x) + .25 * n * math.cos(th))
-		local y = math.floor(.5 * tonumber(env.domain.size.y) + .25 * n * math.sin(th))
-		local z = math.floor(.5 * tonumber(env.domain.size.z)) 
-		local index = x+env.domain.size.x*(y+env.domain.size.y*z)
+		local x = math.floor(.5 * tonumber(env.base.size.x) + .25 * n * math.cos(th))
+		local y = math.floor(.5 * tonumber(env.base.size.y) + .25 * n * math.sin(th))
+		local z = math.floor(.5 * tonumber(env.base.size.z)) 
+		local index = x+env.base.size.x*(y+env.base.size.y*z)
 		JU_CPU[index].s0 = q		
 		JU_CPU[index].s1 = -I * math.sin(th)
 		JU_CPU[index].s2 = I * math.cos(th)
@@ -53,7 +53,7 @@ do	--lazy rasterization
 	end
 end
 
-for i=0,env.domain.volume-1 do
+for i=0,env.base.volume-1 do
 	for j=0,3 do
 		AU_CPU[i].s[j] = -JU_CPU[i].s[j]
 	end
@@ -95,8 +95,8 @@ local A = env:kernel{
 	JU[index] = sum;
 ]], {
 	dx = dx,
-	size = env.domain.size,
-	dim = env.domain.dim,
+	size = env.base.size,
+	dim = env.base.dim,
 	clnumber = require 'cl.obj.number',
 })}
 
@@ -107,13 +107,13 @@ local solver = require('solver.cl.'..solverName){
 	x = AU,
 
 	type = 'real',
-	size = env.domain.volume * 4,
+	size = env.base.volume * 4,
 	errorCallback = function(err,iter)
 		print(iter, err)
 	end,
 
 	epsilon = 1e-5,
-	maxiter = env.domain.volume * 4,
+	maxiter = env.base.volume * 4,
 	restart = 100,
 }
 
@@ -127,9 +127,9 @@ AU:toCPU(AU_CPU)
 local file = assert(io.open('out.txt', 'wb'))
 file:write('#x y z J^t J^x J^y J^z A^t A^x A^y A^z\n')
 local index = 0
-for k=0,tonumber(env.domain.size.z)-1 do
-	for j=0,tonumber(env.domain.size.y)-1 do
-		for i=0,tonumber(env.domain.size.x)-1 do
+for k=0,tonumber(env.base.size.z)-1 do
+	for j=0,tonumber(env.base.size.y)-1 do
+		for i=0,tonumber(env.base.size.x)-1 do
 			file:write(i,'\t',j,'\t',k,
 				'\t',JU_CPU[index].s0,
 				'\t',JU_CPU[index].s1,

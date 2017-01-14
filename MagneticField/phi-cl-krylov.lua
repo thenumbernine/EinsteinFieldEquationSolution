@@ -18,17 +18,17 @@ local env = require 'cl.obj.env'{size={n,n,n}}
 
 -- init
 
-local rhoCPU = ffi.new('real[?]', env.domain.volume)
-local phiCPU = ffi.new('real[?]', env.domain.volume)
+local rhoCPU = ffi.new('real[?]', env.base.volume)
+local phiCPU = ffi.new('real[?]', env.base.volume)
 
-for i=0,env.domain.volume-1 do
+for i=0,env.base.volume-1 do
 	rhoCPU[i] = 0
 end
 
 local vec3d = require 'ffi.vec.vec3d'
 local xmin = vec3d(-1, -1, -1)
 local xmax = vec3d(1, 1, 1)
-local dx = (xmax - xmin) / vec3d(env.domain.size:unpack())
+local dx = (xmax - xmin) / vec3d(env.base.size:unpack())
 	
 do	--lazy rasterization
 	local q = 1							-- Coulombs (C)
@@ -39,16 +39,16 @@ do	--lazy rasterization
 	for i=0,divs-1 do
 		local frac = i / divs
 		local th = 2 * math.pi * frac
-		local x = math.floor(.5 * tonumber(env.domain.size.x) + .25 * n * math.cos(th))
-		local y = math.floor(.5 * tonumber(env.domain.size.y) + .25 * n * math.sin(th))
-		local z = math.floor(.5 * tonumber(env.domain.size.z)) 
+		local x = math.floor(.5 * tonumber(env.base.size.x) + .25 * n * math.cos(th))
+		local y = math.floor(.5 * tonumber(env.base.size.y) + .25 * n * math.sin(th))
+		local z = math.floor(.5 * tonumber(env.base.size.z)) 
 	
-		local index = x + env.domain.size.x * (y + env.domain.size.y * z)
+		local index = x + env.base.size.x * (y + env.base.size.y * z)
 		rhoCPU[index] = q
 	end
 end
 
-for i=0,env.domain.volume-1 do
+for i=0,env.base.volume-1 do
 	phiCPU[i] = -rhoCPU[i]
 end
 
@@ -88,8 +88,8 @@ local A = env:kernel{
 	rho[index] = sum;
 ]], {
 	dx = dx,
-	dim = env.domain.dim,
-	size = env.domain.size,
+	dim = env.base.dim,
+	size = env.base.size,
 	clnumber = require 'cl.obj.number',
 })}
 
@@ -120,9 +120,9 @@ phi:toCPU(phiCPU)
 local file = assert(io.open('out.txt', 'wb'))
 file:write('#x y z rho phi\n')
 local index = 0
-for k=0,tonumber(env.domain.size.z)-1 do
-	for j=0,tonumber(env.domain.size.y)-1 do
-		for i=0,tonumber(env.domain.size.x)-1 do
+for k=0,tonumber(env.base.size.z)-1 do
+	for j=0,tonumber(env.base.size.y)-1 do
+		for i=0,tonumber(env.base.size.x)-1 do
 			file:write(i,'\t',j,'\t',k,
 				'\t',rhoCPU[index],
 				'\t',phiCPU[index],'\n')

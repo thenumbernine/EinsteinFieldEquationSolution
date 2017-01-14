@@ -128,7 +128,7 @@ void time(const std::string name, std::function<void()> f) {
 }
 
 int main() {
-	size_t n = 64;
+	size_t n = 16;	//64;
 	Vector<int, gridDim> size;
 	for (int i = 0; i < gridDim; ++i) {
 		size(i) = n;
@@ -161,8 +161,8 @@ int main() {
 	q *= dx.volume();	// ... per meter cubed (1/m^2)
 //q = 1e-22 for n=64 (dx=.03125)
 //that might be too small for the solvers...
-q = 1;
-std::cout << "q: " << q << std::endl;
+//q = 1;
+//std::cout << "q: " << q << std::endl;
 	
 	int divs = 8 * (int)n;
 	for (int i = 0; i < divs; ++i) {
@@ -304,14 +304,14 @@ std::cout << "q: " << q << std::endl;
 	};
 	for (int i = 0; i < stDim; ++i) {
 		cols.push_back(Col(
-			std::string("A^") + std::string(xs[i]),
-			[&,i](Vector<int,gridDim> index)->real{ return AU(index)(i); }
+			std::string("J^") + std::string(xs[i]),
+			[&,i](Vector<int,gridDim> index)->real{ return JU(index)(i); }
 		));
 	}
 	for (int i = 0; i < stDim; ++i) {
 		cols.push_back(Col(
-			std::string("J^") + std::string(xs[i]),
-			[&,i](Vector<int,gridDim> index)->real{ return JU(index)(i); }
+			std::string("A^") + std::string(xs[i]),
+			[&,i](Vector<int,gridDim> index)->real{ return AU(index)(i); }
 		));
 	}
 	

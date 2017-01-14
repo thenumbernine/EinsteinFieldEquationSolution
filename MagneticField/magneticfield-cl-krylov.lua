@@ -33,10 +33,8 @@ do	--lazy rasterization
 	local q = 1							-- Coulombs (C)
 	q = q * math.sqrt(ke * G) / (c * c)	-- ...times Columbs to meters (m)
 	q = q * dx:volume()					-- ... per meter cubed (1/m^2)
-		
 	local I = q		-- amps (C / s) => 1/(m^2 s)
 	I = I * c		-- (1/m^3)
-
 	local divs = 8 * n
 	for i=0,divs-1 do
 		local frac = i / divs
@@ -44,11 +42,8 @@ do	--lazy rasterization
 		local x = math.floor(.5 * tonumber(env.domain.size.x) + .25 * n * math.cos(th))
 		local y = math.floor(.5 * tonumber(env.domain.size.y) + .25 * n * math.sin(th))
 		local z = math.floor(.5 * tonumber(env.domain.size.z)) 
-	
-		local index = tonumber(x+env.domain.size.x*(y+env.domain.size.y*z))
-
+		local index = x+env.domain.size.x*(y+env.domain.size.y*z)
 		JU_CPU[index].s0 = q		
-	
 		JU_CPU[index].s1 = -I * math.sin(th)
 		JU_CPU[index].s2 = I * math.cos(th)
 		JU_CPU[index].s3 = 0
@@ -120,6 +115,9 @@ require 'LinearSolvers.cl.gmres'
 	errorCallback = function(err,iter)
 		io.stderr:write(tostring(err)..'\t'..tostring(iter)..'\n')
 	end,
+
+	epsilon = 4e-5,
+	restart = 10,
 }
 
 local beginTime = os.clock()

@@ -109,17 +109,17 @@ local sumReduce = env:reduce{
 	op = function(x,y) return x..' + '..y end,
 }
 
---[=[
+-- why does keeping the type real4 make a difference?!?!?!?!
+-- and why does it fail when I only allocate room for 1 result in the reduce object?
+-- [=[
 local square = env:kernel{
 	argsOut = {{name='result', type='real', buf=sumReduce.buffer}},
 	argsIn = {{name='x', type='real', buf=AU.buf}},
-	domain = env.domain.volume * 4,
+	domain = require 'cl.obj.domain'{env=env, size=env.domain.volume * 4},
 	body = [[	real v = x[index];	result[index] = v * v;	]],
 }
 --]=]
--- [=[
--- why does keeping the type real4 make a difference?!?!?!?!
--- and why does it fail when I only allocate room for 1 result in the reduce object?
+--[=[
 local square = env:kernel{
 	argsOut = {{name='result', type='real4', buf=sumReduce.buffer}},
 	argsIn = {{name='x', type='real4', buf=AU.buf}},

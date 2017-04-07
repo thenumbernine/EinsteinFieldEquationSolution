@@ -1440,9 +1440,7 @@ struct SphericalBody : public Body {
 struct EMFieldBody : public Body {
 	//torus-shaped-something
 	//radius is the big radius of the torus
-	EMFieldBody(real radius_)
-	: Body(radius_)
-	{}
+	using Body::Body;
 
 	virtual void initStressEnergyPrim(
 		Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
@@ -1488,6 +1486,28 @@ struct EMFieldBody : public Body {
 			stressEnergyPrims.B(0) = cos(theta) / r * cos(phi);
 			stressEnergyPrims.B(1) = cos(theta) / r * sin(phi);
 			stressEnergyPrims.B(2) = -sin(theta) / r;
+		});
+	}
+};
+
+struct EMLineBody : public Body {
+	using Body::Body;
+
+	virtual void initStressEnergyPrim(
+		Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
+		const Grid<Vector<real, subDim>, subDim>& xs
+	) {
+		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
+			StressEnergyPrims &stressEnergyPrims = stressEnergyPrimGrid(index);
+		
+			stressEnergyPrims.E(0) = 1;
+			stressEnergyPrims.E(1) = 0;
+			stressEnergyPrims.E(2) = 0;
+	
+			stressEnergyPrims.B(0) = 0;
+			stressEnergyPrims.B(1) = 1;
+			stressEnergyPrims.B(2) = 0;
 		});
 	}
 };
@@ -1723,6 +1743,11 @@ struct EMFieldInitCond : public FlatInitCond {
 	//use flat initial metric prims for now
 };
 
+struct EMLineInitCond : public FlatInitCond {
+	std::shared_ptr<EMLineBody> body;
+	EMLineInitCond(std::shared_ptr<EMLineBody> body_) : body(body_) {}
+};
+
 int main(int argc, char** argv) {	
 
 	//std::cout << "mass=" << mass << std::endl;		//m
@@ -1772,7 +1797,7 @@ int main(int argc, char** argv) {
 				//note that G_tt = 8 pi T_tt = 8 pi rho ... for earth = 1.0291932119615e-22 m^-2
 				//const real schwarzschildRadius = 2 * mass;	//Schwarzschild radius: 8.87157 mm, which is accurate
 				//earth magnetic field at surface: .25-.26 gauss
-				const real earthMagneticField = .45 * sqrt(.1 * G) / c;	// 1/m
+				//const real earthMagneticField = .45 * sqrt(.1 * G) / c;	// 1/m
 				return std::make_shared<SphericalBody>(earthRadius, earthMass);
 			}},
 		
@@ -1784,6 +1809,10 @@ int main(int argc, char** argv) {
 		
 			{"em_field", [&](){
 				return std::make_shared<EMFieldBody>(2);
+			}},
+			
+			{"em_line", [&](){
+				return std::make_shared<EMLineBody>(2);
 			}},
 		}, *p;
 	
@@ -1893,6 +1922,11 @@ int main(int argc, char** argv) {
 				std::shared_ptr<EMFieldBody> emFieldBody = std::dynamic_pointer_cast<EMFieldBody>(body);
 				assert(emFieldBody);
 				return std::make_shared<EMFieldInitCond>(emFieldBody);
+			}},
+			{"em_line", [&](){ 
+				std::shared_ptr<EMLineBody> emLineBody = std::dynamic_pointer_cast<EMLineBody>(body);
+				assert(emLineBody);
+				return std::make_shared<EMLineInitCond>(emLineBody);
 			}},
 		}, *p;
 

@@ -5,7 +5,7 @@ this should be a stand-alone tool
 require 'ext'
 local bit = require 'bit'
 local ffi = require 'ffi'
-local gl = require 'ffi.OpenGL'
+local gl = require 'gl'
 local sdl = require 'ffi.sdl'
 local ig = require 'ffi.imgui'
 local ImGuiApp = require 'imguiapp'
@@ -21,6 +21,10 @@ local Tex2D = require 'gl.tex2d'
 local Tex3D = require 'gl.tex3d'
 local Program = require 'gl.program'
 
+local usePoints = false
+if _G.usePoints ~= nil then usePoints = _G.usePoints end
+local useSlices = true
+if _G.useSlices ~= nil then useSlices = _G.useSlices end
 
 local filename, col = ...
 filename = filename or 'out.txt'
@@ -337,45 +341,45 @@ function App:update()
 	gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
 	gl.glEnable(gl.GL_BLEND)
 
-	--[[ points
-	gl.glPointSize(2)
-	gl.glBegin(gl.GL_POINTS)
-	for _,pt in ipairs(self.pts) do
-		gl.glVertex3d( 
-			(pt[1] - .5)/(self.max[1] + 1),
-			(pt[2] - .5)/(self.max[2] + 1),
-			(pt[3] - .5)/(self.max[3] + 1))
+	if usePoints then
+		gl.glPointSize(2)
+		gl.glBegin(gl.GL_POINTS)
+		for _,pt in ipairs(self.pts) do
+			gl.glVertex3d( 
+				(pt[1] - self.min[1])/(self.max[1] - self.max[1]),
+				(pt[2] - self.min[2])/(self.max[2] - self.max[2]),
+				(pt[3] - self.min[3])/(self.max[3] - self.max[3]))
+		end
+		gl.glEnd()
 	end
-	gl.glEnd()
-	--]]
-	-- [[ slices
-	local n = 255
-	local fwd = -viewAngle:zAxis()
-	local fwddir = select(2, table(fwd):map(math.abs):sup())
-	local quad = {{0,0},{1,0},{1,1},{0,1}}
-	local jmin, jmax, jdir
-	if fwd[fwddir] < 0 then
-		jmin, jmax, jdir = 0, n, 1
-	else
-		jmin, jmax, jdir = n, 0, -1
-	end
-	gl.glUniform3f(volumeShader.uniforms.normal.loc, fwddir==1 and jdir or 0, fwddir==2 and jdir or 0, fwddir==3 and jdir or 0)
-	
-	gl.glBegin(gl.GL_QUADS)
-	for j=jmin,jmax,jdir do
-		local f = j/n
-		for _,vtx in ipairs(quad) do
-			if fwddir == 1 then
-				gl.glVertex3f(f, vtx[1], vtx[2])
-			elseif fwddir == 2 then
-				gl.glVertex3f(vtx[1], f, vtx[2])
-			elseif fwddir == 3 then
-				gl.glVertex3f(vtx[1], vtx[2], f)
+	if useSlices then
+		local n = 255
+		local fwd = -viewAngle:zAxis()
+		local fwddir = select(2, table(fwd):map(math.abs):sup())
+		local quad = {{0,0},{1,0},{1,1},{0,1}}
+		local jmin, jmax, jdir
+		if fwd[fwddir] < 0 then
+			jmin, jmax, jdir = 0, n, 1
+		else
+			jmin, jmax, jdir = n, 0, -1
+		end
+		gl.glUniform3f(volumeShader.uniforms.normal.loc, fwddir==1 and jdir or 0, fwddir==2 and jdir or 0, fwddir==3 and jdir or 0)
+		
+		gl.glBegin(gl.GL_QUADS)
+		for j=jmin,jmax,jdir do
+			local f = j/n
+			for _,vtx in ipairs(quad) do
+				if fwddir == 1 then
+					gl.glVertex3f(f, vtx[1], vtx[2])
+				elseif fwddir == 2 then
+					gl.glVertex3f(vtx[1], f, vtx[2])
+				elseif fwddir == 3 then
+					gl.glVertex3f(vtx[1], vtx[2], f)
+				end
 			end
 		end
+		gl.glEnd()
 	end
-	gl.glEnd()
-	--]]
 	
 	gl.glDisable(gl.GL_BLEND)
 

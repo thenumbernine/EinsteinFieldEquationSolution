@@ -230,14 +230,12 @@ natural units ...
 1 = G m^3 / (kg s^2) = 6.67384e-11 m^3 / (kg s^2)
     kg = G m^3 / s^2 = G / c^2 m
 	kg = 7.4256484500929e-28 m
+1 = ke kg m^3 / (s^2 C^2)
+	C = sqrt(ke kg m^3 / s^2) = sqrt(ke G / c^2 m^4 / s^2) = sqrt(ke G m^2 / c^4) = sqrt(ke G) / c^2 m
+	C = 8.6172202304995e-18 m
 1 = kB m^2 kg / (K s^2) = 1.3806488e-23 m^2 kg / (K s^2)
 	K = kB kg m^2 / s^2 = kB / c^2 kg = kB G / c^4 m
 	K = 1.1407124948367e-67 m
-joules: J = kg m^2 / s^2
-electronvolts: 1 eV = 1.6e-19 J
-Gauss: 1 Gauss^2 = g / (cm s^2) = .1 kg / (m s^2)
-	1 Gauss^2 = .1 G/c^4 1/m^2
-	Gauss = sqrt(.1 G/c^2) 1/m
 
 I'm going to use meters as my units ...
 
@@ -246,6 +244,7 @@ Mass of Earth = 5.9736e+24 kg
 */
 const real c = 299792458;	// m/s 
 const real G = 6.67384e-11;	// m^3 / (kg s^2)
+const real ke = 8987551787.3682;	//kg m^3 / (s^2 C^2)
 //const real kB = 1.3806488e-23;	// m^2 kg / (K s^2)
 
 //grid coordinate bounds
@@ -1541,8 +1540,13 @@ struct EMUniformFieldBody : public Body {
 		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
 			StressEnergyPrims &stressEnergyPrims = stressEnergyPrimGrid(index);
-		
-			stressEnergyPrims.E(0) = 1;
+	
+			real volts = 100000;			//V
+			real dist = 0.1;				//m
+			real E = volts / dist;			//V / m
+			E = E * sqrt(ke * G) / (c * c);	//m^-1
+			
+			stressEnergyPrims.E(0) = E;
 			stressEnergyPrims.E(1) = 0;
 			stressEnergyPrims.E(2) = 0;
 	

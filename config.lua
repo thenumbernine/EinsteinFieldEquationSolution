@@ -1,6 +1,9 @@
 -- grid size
+--size = 1
 --size = 4
-size = 64
+--size = 8
+size = 16
+--size = 64
 -- 10*8^3 = 5120
 
 -- body specifies the radius of the problem, and the initial stress energy primitives

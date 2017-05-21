@@ -7,10 +7,10 @@ might get into trouble ensuring the hamiltonian or momentum constraints are fulf
 #include "Tensor/Grid.h"
 #include "Tensor/Inverse.h"
 #include "Tensor/Derivative.h"
-#include "Solvers/ConjGrad.h"
-#include "Solvers/ConjRes.h"
-#include "Solvers/GMRes.h"
-#include "Solvers/JFNK.h"
+#include "Solver/ConjGrad.h"
+#include "Solver/ConjRes.h"
+#include "Solver/GMRES.h"
+#include "Solver/JFNK.h"
 #include "Parallel/Parallel.h"
 #include "Common/Exception.h"
 #include "Common/Macros.h"
@@ -83,6 +83,7 @@ typedef ::Tensor::Tensor<real, Lower<subDim>> TensorLsub;
 typedef ::Tensor::Tensor<real, Upper<subDim>> TensorUsub;
 typedef ::Tensor::Tensor<real, Symmetric<Upper<subDim>, Upper<subDim>>> TensorSUsub;
 typedef ::Tensor::Tensor<real, Symmetric<Lower<subDim>, Lower<subDim>>> TensorSLsub;
+typedef ::Tensor::Tensor<real, Lower<subDim>, Lower<subDim>> TensorLLsub;
 typedef ::Tensor::Tensor<real, Upper<subDim>, Lower<subDim>> TensorULsub;
 
 //dim
@@ -90,7 +91,9 @@ typedef ::Tensor::Tensor<real, Upper<dim>> TensorU;
 typedef ::Tensor::Tensor<real, Lower<dim>> TensorL;
 typedef ::Tensor::Tensor<real, Symmetric<Lower<dim>, Lower<dim>>> TensorSL;
 typedef ::Tensor::Tensor<real, Symmetric<Upper<dim>, Upper<dim>>> TensorSU;
+typedef ::Tensor::Tensor<real, Lower<dim>, Lower<dim>> TensorLL;
 typedef ::Tensor::Tensor<real, Upper<dim>, Lower<dim>> TensorUL;
+typedef ::Tensor::Tensor<real, Upper<dim>, Upper<dim>> TensorUU;
 typedef ::Tensor::Tensor<real, Lower<dim>, Symmetric<Lower<dim>, Lower<dim>>> TensorLSL;
 typedef ::Tensor::Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>> TensorUSL;
 typedef ::Tensor::Tensor<real, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> TensorSLL;
@@ -142,12 +145,28 @@ TensorSUsub inverse(const TensorSLsub& gammaLL) {
 	return gammaUU;
 }
 
+real determinant44(const TensorSL &m) {
+	real sign = 1;
+	real sum = 0;
+	for (int a = 0; a < 4; ++a) {
+		TensorLLsub subm;
+		for (int i = 0; i < 3; ++i) {
+			for (int j = 0; j < 3; ++j) {
+				subm(i,j) = m(i+1, j + (j>=a));
+			}
+		}
+		sum += sign * m(0,a) * determinant33<real, TensorLLsub>(subm);
+		sign = -sign;
+	}
+	return sum;
+}
+
 //variables used to build the metric 
 //dim * (dim+1) / 2 vars
 struct MetricPrims {
 	real alphaMinusOne;
 	TensorUsub betaU;
-	TensorSLsub gammaLL;
+	TensorSLsub hLL;	//h_ij = gamma_ij - delta_ij
 	MetricPrims() : alphaMinusOne(0) {}
 };
 
@@ -251,6 +270,15 @@ void allocateGrid(Grid<CellType, subDim>& grid, std::string name, Vector<int, su
 	grid.resize(sizev);
 }
 
+static TensorSLsub make_delta3LL() {
+	TensorSLsub delta3LL;
+	delta3LL(0,0) = 1.;
+	delta3LL(1,1) = 1.;
+	delta3LL(2,2) = 1.;
+	return delta3LL;
+}
+TensorSLsub delta3LL = make_delta3LL();
+
 /*
 calculates contents of gUUs, gLLs
 	(incl. first deriv: dt_gLLs)
@@ -276,7 +304,7 @@ void calc_gLLs_and_gUUs(
 //lesson: the problem isn't linear.  don't use Krylov solvers.
 assert(alpha != 0);
 		const TensorUsub &betaU = metricPrims.betaU;
-		const TensorSLsub &gammaLL = metricPrims.gammaLL;
+		TensorSLsub gammaLL = metricPrims.hLL + delta3LL;
 	
 		//I can only solve for one of these.  or can I do more?  without solving for d/dt variables, I am solving 10 unknowns for 10 constraints. 
 		const MetricPrims& dt_metricPrims = dt_metricPrimGrid(index);
@@ -310,7 +338,7 @@ assert(alpha != 0);
 
 		real dt_alpha = dt_metricPrims.alphaMinusOne + 1.;
 		const TensorUsub& dt_betaU = dt_metricPrims.betaU;
-		const TensorSLsub& dt_gammaLL = dt_metricPrims.gammaLL;
+		TensorSLsub dt_gammaLL = dt_metricPrims.hLL + delta3LL;
 		
 		//g_ab,t
 		TensorSL &dt_gLL = dt_gLLs(index);
@@ -351,12 +379,13 @@ assert(alpha != 0);
 			}
 		}
 //debugging
+#ifdef DEBUG
 for (int a = 0; a < dim; ++a) {
 	for (int b = 0; b <= a; ++b) {
 		assert(gUU(a,b) == gUU(a,b));
 	}
 }
-
+#endif
 		//gamma^ij_,t
 		//https://math.stackexchange.com/questions/1187861/derivative-of-transpose-of-inverse-of-matrix-with-respect-to-matrix
 		//d/dt AInv_kl = dAInv_kl / dA_ij d/dt A_ij
@@ -491,8 +520,9 @@ TensorSL calc_EinsteinLL(
 			for (int i = 0; i < subDim; ++i) {
 				index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
 			}
-			
+
 //debugging
+#ifdef DEBUG
 const TensorUSL& GammaULL = GammaULLs(index);
 for (int i = 0; i < dim; ++i) {
 	for (int j = 0; j < dim; ++j) {
@@ -501,6 +531,7 @@ for (int i = 0; i < dim; ++i) {
 		}
 	}
 }
+#endif
 			return GammaULLs(index);
 		});
 	
@@ -663,12 +694,13 @@ void calc_EinsteinLLs(
 		EinsteinLL = calc_EinsteinLL(index, gLLs, gUUs, GammaULLs);
 
 //debugging
+#ifdef DEBUG
 for (int a = 0; a < dim; ++a) {
 	for (int b = 0; b <= a; ++b) {
 		assert(EinsteinLL(a,b) == EinsteinLL(a,b));
 	}
 }
-	
+#endif
 	});
 }
 
@@ -683,12 +715,10 @@ notice: stress energy depends on gLL (i.e. alpha, betaU, gammaLL), which it is s
 TensorSL calc_8piTLL(
 	const MetricPrims& metricPrims,
 	const TensorSL &gLL,
+	const TensorSU &gUU,
 	const StressEnergyPrims& stressEnergyPrims
 ) {
-	real alpha = metricPrims.alphaMinusOne + 1.;
-	real alphaSq = alpha * alpha;
-	const TensorUsub &betaU = metricPrims.betaU;
-	const TensorSLsub &gammaLL = metricPrims.gammaLL;
+	TensorSLsub gammaLL = metricPrims.hLL + delta3LL;
 
 	//electromagnetic stress-energy
 	TensorSL T_EM_LL;
@@ -725,48 +755,100 @@ TensorSL calc_8piTLL(
 		TensorUsub E = stressEnergyPrims.E;
 		TensorUsub B = stressEnergyPrims.B;
 #endif
-
-		//electromagnetic stress-energy
-		real ESq = 0, BSq = 0;
-		for (int i = 0; i < subDim; ++i) {
-			for (int j = 0; j < subDim; ++j) {
-				ESq += E(i) * E(j) * gammaLL(i,j);
-				BSq += B(i) * B(j) * gammaLL(i,j);
-			}
-		}
-		TensorUsub S = cross<real>(E, B);
 		
-		TensorSL T_EM_UU;
-		T_EM_UU(0,0) = (ESq + BSq) / alphaSq / (8 * M_PI);
-		for (int i = 0; i < subDim; ++i) {
-			T_EM_UU(i+1,0) = (-betaU(i) * (ESq + BSq) / alphaSq + 2 * S(i) / alpha) / (8 * M_PI);
-			for (int j = 0; j <= i; ++j) {
-				T_EM_UU(i+1,j+1) = -2 * (E(i) * E(j) + B(i) * B(j) + (S(i) * B(j) + S(j) * B(i)) / alpha) + betaU(i) * betaU(j) * (ESq + BSq) / alphaSq;
-				if (i == j) {
-					T_EM_UU(i+1,j+1) += ESq + BSq;
-				}
-				T_EM_UU(i+1,j+1) /= 8 * M_PI;
+		//should I be doing a full 4x4 determinant?
+		//if converging beta then yep
+		real sqrtDetG = sqrt(fabs(determinant44(gLL)));
+	
+		//n_a = t_,a
+		TensorL nL;
+		for (int a = 0; a < 4; ++a) {
+			nL(a) = a == 0 ? 1 : 0;
+		}
+	
+		//n^a = g^ab n_b
+		TensorU nU;
+		for (int a = 0; a < 4; ++a) {
+			real sum = 0;
+			for (int b = 0; b < 4; ++b) {
+				sum += gUU(a,b) * nL(b);
+			}
+			nU(a) = sum;
+		}
+
+		TensorU BU, EU;
+		for (int i = 0; i < 3; ++i) {
+			BU(i+1) = B(i);
+			EU(i+1) = E(i);
+		}
+	
+		TensorL EL;
+		for (int a = 0; a < 4; ++a) {
+			real sum = 0;
+			for (int b = 0; b < 4; ++b) {
+				sum += gLL(a,b) * EU(b);
+			}
+			EL(a) = sum;
+		}
+
+		//Faraday
+		//F_ab = n^d epsilon_adbf g^fg B_g - n_a E_b + E_a n_b
+		//	= E_a n_b - n_a E_b - sqrt|g| n^c [abcd] B^d
+		//	= E_a n_b - n_a E_b - sqrt|g| n^c [abcd] B^d
+		//assuming E and B are specified in Cartesian coordinates as one-forms
+		TensorLL F_LL;
+		for (int a = 0; a < dim; ++a) {
+			for (int b = 0; b < dim; ++b) {
+				F_LL(a,b) = EL(a) * nL(b) - nL(a) * EL(b);
 			}
 		}
 
-		TensorUL T_EM_LU;
+		real tmp;
+#define ADD_B_TO_F(a,b,c,d)	tmp = sqrtDetG * (BU(c) * nU(d) - BU(d) * nU(c)); F_LL(a,b) += tmp; F_LL(b,a) -= tmp;
+		ADD_B_TO_F(0,1,2,3)	//+ 0 1 2 3, - 0 1 3 2
+		ADD_B_TO_F(0,2,3,1)	//+ 0 2 3 1, - 0 2 1 3
+		ADD_B_TO_F(0,3,1,2)	//+ 0 3 1 2, - 0 3 2 1	
+		ADD_B_TO_F(1,2,0,3)	//+ 1 2 0 3, - 1 2 3 0
+		ADD_B_TO_F(1,3,2,0)	//+ 1 3 2 0, - 1 3 0 2
+		ADD_B_TO_F(2,3,0,1)	//+ 2 3 0 1, - 2 3 1 0
+
+		TensorUL F_LU;
 		for (int a = 0; a < dim; ++a) {
 			for (int b = 0; b < dim; ++b) {
 				real sum = 0;
-				for (int w = 0; w < dim; ++w) {
-					sum += gLL(a,w) * T_EM_UU(w,b);
+				for (int c = 0; c < dim; ++c) {
+					sum += F_LL(a,c) * gUU(c,b);
 				}
-				T_EM_LU(a,b) = sum;
+				F_LU(a,b) = sum;
+			}
+		}
+		
+		TensorUU F_UU;
+		for (int a = 0; a < dim; ++a) {
+			for (int b = 0; b < dim; ++b) {
+				real sum = 0;
+				for (int c = 0; c < dim; ++c) {
+					sum += gUU(a,c) * F_LU(c,b);
+				}
+				F_UU(a,b) = sum;
 			}
 		}
 
+		real FNormSq = 0;
+		for (int a = 0; a < dim; ++a) {
+			for (int b = 0; b < dim; ++b) {
+				FNormSq += F_LL(a,b) * F_UU(a,b);
+			}
+		}
+		
+		//T_ab = 1/(4 pi) (F_ac F_b^c - 1/4 g_ab F_cd F^cd)
 		for (int a = 0; a < dim; ++a) {
 			for (int b = 0; b <= a; ++b) {
-				real sum = 0;
-				for (int w = 0; w < dim; ++w) {
-					sum += T_EM_LU(a,w) * gLL(w,b);
+				real sum = -gLL(a,b) * FNormSq / 4.;
+				for (int c = 0; c < dim; ++c) {
+					sum += F_LL(a,c) * F_LU(b,c);
 				}
-				T_EM_LL(a,b) = sum;
+				T_EM_LL(a,b) = sum / (4. * M_PI);
 			}
 		}
 	}
@@ -860,7 +942,11 @@ void calc_EFE_constraint(
 		// alpha, beta x3, gamma x6
 		// ... which is 10 variables
 		// tada!
-		TensorSL _8piT_LL = calc_8piTLL(metricPrimGrid(index), gLLs(index), stressEnergyPrimGrid(index));
+		TensorSL _8piT_LL = calc_8piTLL(
+			metricPrimGrid(index),
+			gLLs(index),
+			gUUs(index),
+			stressEnergyPrimGrid(index));
 		
 		/*
 		now solve the linear system G_uv = G(g_uv) = 8 pi T_uv for g_uv 
@@ -903,7 +989,7 @@ struct KrylovSolver : public EFESolver {
 	using Super::Super;
 	
 	Grid<TensorSL, subDim> _8piTLLs;
-	std::shared_ptr<Solvers::Krylov<real>> krylov;
+	std::shared_ptr<Solver::Krylov<real>> krylov;
 
 	KrylovSolver(int maxiter)
 	: Super(maxiter)
@@ -927,7 +1013,11 @@ struct KrylovSolver : public EFESolver {
 	) {
 		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
-			_8piTLLs(index) = calc_8piTLL(metricPrimGrid(index), gLLs(index), stressEnergyPrimGrid(index));
+			_8piTLLs(index) = calc_8piTLL(
+				metricPrimGrid(index), 
+				gLLs(index), 
+				gUUs(index),
+				stressEnergyPrimGrid(index));
 		});
 	}
 
@@ -938,9 +1028,11 @@ struct KrylovSolver : public EFESolver {
 		const Grid<MetricPrims, subDim>& dt_metricPrimGrid	//first deriv
 	) {
 //debugging
+#ifdef DEBUG
 for (int i = 0; i < (int)getN(); ++i) {
 	assert(x[i] == x[i]);
 }
+#endif
 
 #ifdef PRINTTIME
 		std::cout << "iteration " << jfnk.iter << std::endl;
@@ -969,15 +1061,17 @@ for (int i = 0; i < (int)getN(); ++i) {
 				//output
 				EinsteinLLs);
 //debugging
+#ifdef DEBUG
 for (int i = 0; i < (int)getN(); ++i) {
 	assert(y[i] == y[i]);
 }
+#endif
 
 #ifdef PRINTTIME
 		});
 #endif				
 
-		//here's me abusing GMRes.
+		//here's me abusing GMRES.
 		//I'm updating the 'b' vector mid-algorithm since it is dependent on the 'x' vector
 		//maybe I shouldn't be doing so here, but instead only before every linear solver solve()?
 		//that way the 'b' vector is constant during the linear solver solve() ...
@@ -992,7 +1086,7 @@ for (int i = 0; i < (int)getN(); ++i) {
 #endif
 	}
 
-	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver(
+	virtual std::shared_ptr<Solver::Krylov<real>> makeSolver(
 		Grid<MetricPrims, subDim>& metricPrimGrid,
 		const Grid<MetricPrims, subDim>& dt_metricPrimGrid	//first deriv
 	) = 0;
@@ -1014,11 +1108,13 @@ for (int i = 0; i < (int)getN(); ++i) {
 		);
 		
 		//seems this is stopping too early, so try scaling both x and y ... or at least the normal that is used ...
-		/*krylov->MInv = [&](real* y, const real* x) {
+#if 0		
+		krylov->MInv = [&](real* y, const real* x) {
 			for (int i = 0; i < krylov->n; ++i) {
 				y[i] = x[i] * c * c;
 			}
-		};*/
+		};
+#endif		
 		krylov->stopCallback = [&]()->bool{
 			printf("%s iter %d residual %.49e\n", name(), krylov->getIter(), krylov->getResidual());
 			return false;
@@ -1035,11 +1131,11 @@ struct ConjGradSolver : public KrylovSolver {
 	
 	virtual const char* name() { return "conjgrad"; }	
 	
-	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver(
+	virtual std::shared_ptr<Solver::Krylov<real>> makeSolver(
 		Grid<MetricPrims, subDim>& metricPrimGrid,
 		const Grid<MetricPrims, subDim>& dt_metricPrimGrid	//first deriv
 	) {
-		return std::make_shared<Solvers::ConjGrad<real>>(
+		return std::make_shared<Solver::ConjGrad<real>>(
 			getN(),
 			(real*)metricPrimGrid.v,
 			(const real*)_8piTLLs.v,
@@ -1050,13 +1146,15 @@ struct ConjGradSolver : public KrylovSolver {
 	}
 };
 
-struct ConjRes : public Solvers::ConjRes<real> {
-	using Solvers::ConjRes<real>::ConjRes;
+struct ConjRes : public Solver::ConjRes<real> {
+	using Solver::ConjRes<real>::ConjRes;
 	virtual real calcResidual(real rNormL2, real bNormL2, const real* r) {
 //debugging
+#ifdef DEBUG
 for (int i = 0; i < (int)n; ++i) {
-assert(r[i] == r[i]);
+	assert(r[i] == r[i]);
 }
+#endif
 		std::cout << "ConjRes::calcResidual"
 			<< " n=" << n
 			<< " iter=" << iter
@@ -1074,7 +1172,7 @@ struct ConjResSolver : public KrylovSolver {
 	
 	virtual const char* name() { return "conjres"; }
 
-	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver(
+	virtual std::shared_ptr<Solver::Krylov<real>> makeSolver(
 		Grid<MetricPrims, subDim>& metricPrimGrid,
 		const Grid<MetricPrims, subDim>& dt_metricPrimGrid	//first deriv
 	) {
@@ -1089,15 +1187,15 @@ struct ConjResSolver : public KrylovSolver {
 	}
 };
 
-struct GMRes : public Solvers::GMRes<real> {
-	using Solvers::GMRes<real>::GMRes;
+struct GMRES : public Solver::GMRES<real> {
+	using Solver::GMRES<real>::GMRES;
 	virtual real calcResidual(real rNormL2, real bNormL2, const real* r) {
 #if 0
 		//error is 16, is sqrt(total sum of errors) which is 256, which is 4 * 64
 		// 64 is the # of grid elements, 4 is how much error per grid
 		// because the inputs have 4 1's and the rest is 0's.
-		real real_rNormL2 = Solvers::Vector<real>::normL2(n, r);
-		std::cout << "GMRes::calcResidual"
+		real real_rNormL2 = Solver::Vector<real>::normL2(n, r);
+		std::cout << "GMRES::calcResidual"
 			<< " iter=" << iter
 			<< " rNormL2=" << rNormL2
 			<< " bNormL2=" << bNormL2
@@ -1118,17 +1216,17 @@ struct GMRes : public Solvers::GMRes<real> {
 	}
 };
 
-struct GMResSolver : public KrylovSolver {
+struct GMRESSolver : public KrylovSolver {
 	typedef KrylovSolver Super;
 	using Super::Super;
 	
 	virtual const char* name() { return "gmres"; }
 
-	virtual std::shared_ptr<Solvers::Krylov<real>> makeSolver(
+	virtual std::shared_ptr<Solver::Krylov<real>> makeSolver(
 		Grid<MetricPrims, subDim>& metricPrimGrid,
 		const Grid<MetricPrims, subDim>& dt_metricPrimGrid	//first deriv
 	) {
-		return std::make_shared<GMRes>(
+		return std::make_shared<GMRES>(
 			getN(),	//n = vector size
 			(real*)metricPrimGrid.v,		//x = state vector
 			(const real*)_8piTLLs.v,		//b = solution vector
@@ -1143,28 +1241,23 @@ struct GMResSolver : public KrylovSolver {
 	}
 };
 
-struct JFNK : public Solvers::JFNK<real> {
-	using Solvers::JFNK<real>::JFNK;
+struct JFNK : public Solver::JFNK<real> {
+	using Solver::JFNK<real>::JFNK;
 	virtual real calcResidual(const real* r, real alpha) const {
-#if 1
-		//residual is only used to compare whether somethig is better or worse than somethign else, so scale it up
+		//scale it up
 		real sum = 0;
 		for (int i = 0; i < (int)n; ++i) {
 			sum += r[i] * r[i];
 		}
-#ifdef CONVERGE_ALPHA_ONLY
-		real residual = sqrt(sum) * 8. * M_PI * G / c / c * 1000.;
-#else		
+#if 1
 		real residual = sqrt(sum) / (8. * M_PI) * c * c / G / 1000.;
 #endif
-
 		std::cout << "JFNK::calcResidual"
 			<< " n=" << n
 			<< " iter=" << iter
 			<< " alpha=" << alpha
 			<< " residual=" << residual 
 			<< std::endl;
-#endif	
 		return residual;
 	}
 	size_t getN() const { return n; }
@@ -1316,12 +1409,12 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 });
 #endif	//debug output
 			},
-			1e-7, 				//newton stop epsilon
+			1e-50, 				//newton stop epsilon
 			maxiter, 			//newton max iter
-			[&](size_t n, real* x, real* b, JFNK::Func A) -> std::shared_ptr<Solvers::Krylov<real>> {
-				return std::make_shared<GMRes>(
+			[&](size_t n, real* x, real* b, JFNK::Func A) -> std::shared_ptr<Solver::Krylov<real>> {
+				return std::make_shared<GMRES>(
 					n, x, b, A,
-					1e-7, 				//gmres stop epsilon
+					1e-50, 				//gmres stop epsilon
 					n, //n*10,				//gmres max iter
 					gmresRestart		//gmres restart iter
 				);
@@ -1346,7 +1439,7 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 			
 			return false;
 		};
-		std::shared_ptr<GMRes> gmres = std::dynamic_pointer_cast<GMRes>(jfnk.getLinearSolver());
+		std::shared_ptr<GMRES> gmres = std::dynamic_pointer_cast<GMRES>(jfnk.getLinearSolver());
 		real lastResidual;
 		gmres->stopCallback = [&]()->bool{
 			if (gmres->getIter() > (int)jfnk.getN()) {
@@ -1368,15 +1461,15 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 			
 			return false;
 		};
+//when I enable preconditioners, my gmres residual oscillates between near-zero and 10^15
+//I don't think I've ever tested preconditioners ...
+#if 0
 		gmres->MInv = [&](real* y, const real* x) {
 			for (int i = 0; i < (int)jfnk.getN(); ++i) {
 				y[i] = x[i] / (8. * M_PI) * c * c / G / 1000.;
-#ifdef CONVERGE_ALPHA_ONLY
-				y[i] *= c * c;
-#endif
 			}
 		};
-
+#endif
 		time("solving", [&](){
 			jfnk.solve();
 		});
@@ -1538,7 +1631,7 @@ struct FlatInitCond : public InitCond {
 			for (int i = 0; i < subDim; ++i) {
 				metricPrims.betaU(i) = 0;
 				for (int j = 0; j <= i; ++j) {
-					metricPrims.gammaLL(i,j) = (real)(i == j);
+					metricPrims.hLL(i,j) = 0;
 				}
 			}
 		});
@@ -1588,7 +1681,7 @@ struct StellarSchwarzschildInitCond : public SphericalBodyInitCond {
 			for (int i = 0; i < subDim; ++i) {
 				metricPrims.betaU(i) = 0;
 				for (int j = 0; j <= i; ++j) {
-					metricPrims.gammaLL(i,j) = (real)(i == j) + xi(i)/r * xi(j)/r * 2*m/(r - 2*m);
+					metricPrims.hLL(i,j) = xi(i)/r * xi(j)/r * 2*m/(r - 2*m);
 					/*
 					dr^2's coefficient
 					spherical: 1/(1 - 2M/r) = 1/((r - 2M)/r) = r/(r - 2M)
@@ -1644,7 +1737,7 @@ struct StellarSchwarzschildInitCond : public SphericalBodyInitCond {
 						/ (r * r * r * r * (r - 2 * m) * (r - 2 * m));
 						sum += dxHat_k_of_gamma_ij * dt_xHat(k);
 					}
-					dt_metricPrims.gammaLL(i,j) = sum;
+					dt_metricPrims.hLL(i,j) = sum - (real)(i == j);
 				}
 			}
 #endif
@@ -1664,7 +1757,7 @@ struct StellarSchwarzschildInitCond : public SphericalBodyInitCond {
 				real dm_dr = 0;
 				betaL(i) = -(2*m * (r - 2*m) + 2 * dm_dr * r * (2*m - r)) / (2 * r * r * r) * xi(i)/r;
 			}
-			TensorSUsub gammaUU = inverse(metricPrims.gammaLL);
+			TensorSUsub gammaUU = inverse(metricPrims.hLL + delta3LL);
 			for (int i = 0; i < subDim; ++i) {
 				real sum = 0;
 				for (int j = 0; j < subDim; ++j) {
@@ -1733,7 +1826,7 @@ struct StellarKerrNewmanInitCond : public SphericalBodyInitCond {
 			for (int i = 0; i < subDim; ++i) {
 				metricPrims.betaU(i) = 2. * H * l(i) / (1. + 2. * H);
 				for (int j = 0; j <= i; ++j) {
-					metricPrims.gammaLL(i,j) = (real)(i == j) + 2 * H * l(i) * l(j); 
+					metricPrims.hLL(i,j) = 2 * H * l(i) * l(j); 
 				}
 			}
 		});
@@ -1957,7 +2050,7 @@ int main(int argc, char** argv) {
 			std::function<std::shared_ptr<EFESolver>()> func;
 		} solvers[] = {
 			{"jfnk", [&](){ return std::make_shared<JFNKSolver>(maxiter); }},
-			{"gmres", [&](){ return std::make_shared<GMResSolver>(maxiter); }},
+			{"gmres", [&](){ return std::make_shared<GMRESSolver>(maxiter); }},
 			{"conjres", [&](){ return std::make_shared<ConjResSolver>(maxiter); }},
 			{"conjgrad", [&](){ return std::make_shared<ConjGradSolver>(maxiter); }},
 		}, *p;
@@ -2062,7 +2155,7 @@ int main(int argc, char** argv) {
 			{"iy", [&](Vector<int,subDim> index)->real{ return index(1); }},
 			{"iz", [&](Vector<int,subDim> index)->real{ return index(2); }},
 			{"rho", [&](Vector<int,subDim> index)->real{ return stressEnergyPrimGrid(index).rho; }},
-			{"det-1", [&](Vector<int,subDim> index)->real{ return -1 + determinant33<real, TensorSLsub>(metricPrimGrid(index).gammaLL); }},
+			{"det_h", [&](Vector<int,subDim> index)->real{ return determinant33<real, TensorSLsub>(metricPrimGrid(index).hLL); }},
 			{"alpha-1", [&](Vector<int,subDim> index)->real{ return metricPrimGrid(index).alphaMinusOne; }},
 #if 0	//within 1e-23			
 			{"ortho_error", [&](Vector<int,subDim> index)->real{

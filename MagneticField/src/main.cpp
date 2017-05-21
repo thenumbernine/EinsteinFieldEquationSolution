@@ -1,9 +1,9 @@
 #include <iostream>
 #include "Parallel/Parallel.h"
 #include "Tensor/Grid.h"
-#include "Solvers/ConjGrad.h"
-#include "Solvers/ConjRes.h"
-#include "Solvers/GMRes.h"
+#include "Solver/ConjGrad.h"
+#include "Solver/ConjRes.h"
+#include "Solver/GMRES.h"
 #include "Common/Macros.h"
 
 Parallel::Parallel parallel(8);
@@ -186,7 +186,7 @@ int main() {
 		AU(index) = -JU(index);
 	});
 
-	Solvers::Krylov<real>::Func A = [&](real* JU_, const real* AU_) {
+	Solver::Krylov<real>::Func A = [&](real* JU_, const real* AU_) {
 		Grid<Vector<real, stDim>, gridDim> JU(size, (Vector<real,stDim>*)JU_);
 		Grid<const Vector<real, stDim>, gridDim> AU(size, (const Vector<real,stDim>*)AU_);
 
@@ -242,17 +242,17 @@ int main() {
 
 //hmm, some problems:
 //ConjGrad is segfaulting
-//ConjRes and GMRes stop immediately if q=1e-22
+//ConjRes and GMRES stop immediately if q=1e-22
 //both of them bottom-out at .0002 if q=1
 //...and the Lua implementations of these works fine, but slower...
 
-	//Solvers::ConjGrad<real> solver(volume, (real*)AU.v, (const real*)JU.v, A, 1e-5, volume);
+	//Solver::ConjGrad<real> solver(volume, (real*)AU.v, (const real*)JU.v, A, 1e-5, volume);
 	
 	//ConjRes took 0.0491484s to solve within 1e-7
-	Solvers::ConjRes<real> solver(volume, (real*)AU.v, (const real*)JU.v, A, 1e-5, volume);
+	Solver::ConjRes<real> solver(volume, (real*)AU.v, (const real*)JU.v, A, 1e-5, volume);
 
-	//GMRes took 0.507793s to solve within 1e-7 with a restart of 100
-	//Solvers::GMRes<real> solver(volume, (real*)AU.v, (const real*)JU.v, A, 1e-5, volume, 100);
+	//GMRES took 0.507793s to solve within 1e-7 with a restart of 100
+	//Solver::GMRES<real> solver(volume, (real*)AU.v, (const real*)JU.v, A, 1e-5, volume, 100);
 	
 	solver.stopCallback = [&]()->bool{
 		std::cerr << solver.getResidual() << "\t" << solver.getIter() << std::endl;

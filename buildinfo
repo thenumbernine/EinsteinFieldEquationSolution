@@ -1,4 +1,4 @@
 distName='EFESoln'
 distType='app'
-depends:append{'../Common', '../Tensor', '../Solvers', '../LuaCxx', '../Parallel'}
+depends:append{'../Common', '../Tensor', '../Solver', '../LuaCxx', '../Parallel'}
 pthread = true

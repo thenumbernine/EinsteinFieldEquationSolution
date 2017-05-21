@@ -1,13 +1,13 @@
 -- grid size
-size = 4
---size = 64
+--size = 4
+size = 64
 -- 10*8^3 = 5120
 
 -- body specifies the radius of the problem, and the initial stress energy primitives
 --body = 'earth'
 --body = 'sun'
---body = 'em_field'
-body = 'em_line'
+body = 'EMUniformField'
+--body = 'em_line'
 
 -- this says how much bigger is our grid than our body radius
 bodyRadii = 2
@@ -16,8 +16,8 @@ bodyRadii = 2
 --initCond = 'flat'
 --initCond = 'stellar_schwarzschild'
 --initCond = 'stellar_kerr_newman'
---initCond = 'em_field'
-initCond = 'em_line'
+initCond = 'EMUniformField'
+--initCond = 'em_line'
 
 --solver = 'conjgrad'
 --solver = 'conjres'

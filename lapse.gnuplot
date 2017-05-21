@@ -9,6 +9,8 @@ min(x,y) = (x < y) ? x : y
 c = 299792458.						# ... m/s = 1
 G = 6.67384e-11						# ... m^3 / (kg s^2) = 1
 
+theta = pi/2.						# polar angle for Kerr metric
+
 # set radius and density to temporary values:
 R = 1.
 density = .1
@@ -29,20 +31,20 @@ set ylabel 'm/s^2'
 # show gravity only, in m/s^2
 set output 'images/schwarzschild_gravity.png'
 set log y
-plot [0:R*10.] -newton_gravity(x) title 'newton gravity', -schwarzschild_gravity(x) title 'schwarzschild gravity', -kerr_gravity(x,earth_a) title 'kerr gravity'
+plot [0:R*10.] -newton_gravity(x) title 'newton gravity', -schwarzschild_gravity(x) title 'schwarzschild gravity', -kerr_gravity(x,earth_a,theta) title 'kerr gravity'
 unset log y
 
 # show differences in gravity 
 set output 'images/gravity_differences.png'
 plot [0:R*2.] abs(schwarzschild_gravity(x)) - abs(newton_gravity(x)) title '|schwarzschild|-|newton|', \
-				abs(schwarzschild_gravity(x)) - abs(kerr_gravity(x,earth_a)) title '|schwarzschild|-|kerr|', \
-				abs(newton_gravity(x)) - abs(kerr_gravity(x,earth_a)) title '|newton|-|kerr|'
+				abs(schwarzschild_gravity(x)) - abs(kerr_gravity(x,earth_a,theta)) title '|schwarzschild|-|kerr|', \
+				abs(newton_gravity(x)) - abs(kerr_gravity(x,earth_a,theta)) title '|newton|-|kerr|'
 
 # rotation-less Kerr isn't the same as Schwarzschild ... It weaker than rotation Kerr.  It is within 2e-10 of rotation Kerr ... 2e-11 at the Earth's surface
 # note that Schwarzschild (which is rotation-less) is stronger than rotation-Kerr and rotation-less Kerr by about 1.4e-8
 
 set output 'images/kerr with vs. without rotation.png'
-plot [0:R*2.] abs(kerr_gravity(x,earth_a)) - abs(kerr_gravity(x,0)) title '|kerr w/rotation|-|kerr w/o rotation|'
+plot [0:R*2.] abs(kerr_gravity(x,earth_a,theta)) - abs(kerr_gravity(x,0,theta)) title '|kerr w/rotation|-|kerr w/o rotation|'
 
 set output 'images/kerr fast rotation vs. kerr rotation.png'
-plot [R:R*2.] abs(kerr_gravity(x,520000*earth_a)) - abs(kerr_gravity(x,earth_a)) title '|kerr fast rotation|-|kerr w/rotation| ... how to double gravity only using rotation'
+plot [R:R*2.] abs(kerr_gravity(x,520000*earth_a,theta)) - abs(kerr_gravity(x,earth_a,theta)) title '|kerr fast rotation|-|kerr w/rotation| ... how to double gravity only using rotation'

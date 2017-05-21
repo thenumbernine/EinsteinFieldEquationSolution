@@ -19,6 +19,8 @@ might get into trouble ensuring the hamiltonian or momentum constraints are fulf
 #include <functional>
 #include <chrono>
 
+#define CONVERGE_ALPHA_ONLY
+
 const int numThreads = 8;
 Parallel::Parallel parallel(numThreads);
 
@@ -143,10 +145,10 @@ TensorSUsub inverse(const TensorSLsub& gammaLL) {
 //variables used to build the metric 
 //dim * (dim+1) / 2 vars
 struct MetricPrims {
-	real alpha;
+	real alphaMinusOne;
 	TensorUsub betaU;
 	TensorSLsub gammaLL;
-	MetricPrims() : alpha(1) {}
+	MetricPrims() : alphaMinusOne(0) {}
 };
 
 //variables used to build the stress-energy tensor
@@ -268,7 +270,7 @@ void calc_gLLs_and_gUUs(
 	RangeObj<subDim> range(Vector<int,subDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
 		const MetricPrims &metricPrims = metricPrimGrid(index);
-		real alpha = metricPrims.alpha;
+		real alpha = metricPrims.alphaMinusOne + 1.;
 //debugging
 //looks like, for the Krylov solvers, we have a problem of A(x) producing zero and A(A(x)) giving us zeros here ... which cause singular basises
 //lesson: the problem isn't linear.  don't use Krylov solvers.
@@ -306,7 +308,7 @@ assert(alpha != 0);
 			}
 		}
 
-		real dt_alpha = dt_metricPrims.alpha;
+		real dt_alpha = dt_metricPrims.alphaMinusOne + 1.;
 		const TensorUsub& dt_betaU = dt_metricPrims.betaU;
 		const TensorSLsub& dt_gammaLL = dt_metricPrims.gammaLL;
 		
@@ -683,7 +685,7 @@ TensorSL calc_8piTLL(
 	const TensorSL &gLL,
 	const StressEnergyPrims& stressEnergyPrims
 ) {
-	real alpha = metricPrims.alpha;
+	real alpha = metricPrims.alphaMinusOne + 1.;
 	real alphaSq = alpha * alpha;
 	const TensorUsub &betaU = metricPrims.betaU;
 	const TensorSLsub &gammaLL = metricPrims.gammaLL;
@@ -887,8 +889,6 @@ struct EFESolver {
 		const Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid
 	) = 0;
 };
-
-//#define CONVERGE_ALPHA_ONLY
 
 /*
 use a linear solver and treat G_ab = 8 pi T_ab like a linear system A x = b for x = (alpha, beta, gamma), A x = G_ab(x), and b = 8 pi T_ab ... which is also a function of x ...
@@ -1199,9 +1199,9 @@ struct JFNKSolver : public EFESolver {
 		assert(sizeof(MetricPrims) == sizeof(EFEGrid.v[0]));	//this should be 10 real numbers and nothing else
 		
 #ifdef CONVERGE_ALPHA_ONLY
-		std::vector<real> alphas(gridVolume);
+		std::vector<real> alphaMinusOnes(gridVolume);
 		for (int i = 0; i < gridVolume; ++i) {
-			alphas[i] = metricPrimGrid.v[i].alpha;
+			alphaMinusOnes[i] = metricPrimGrid.v[i].alphaMinusOne;
 		}
 #endif
 		
@@ -1209,7 +1209,7 @@ struct JFNKSolver : public EFESolver {
 		JFNK jfnk(
 #ifdef CONVERGE_ALPHA_ONLY
 			gridVolume,	//n = vector size
-			alphas.data(),	//x = state vector
+			alphaMinusOnes.data(),	//x = state vector
 #else
 			getN(),	//n = vector size
 			(real*)metricPrimGrid.v,	//x = state vector
@@ -1219,7 +1219,7 @@ struct JFNKSolver : public EFESolver {
 #ifdef CONVERGE_ALPHA_ONLY
 				//Grid<MetricPrims, subDim> metricPrimGrid(sizev);
 				for (int k = 0; k < gridVolume; ++k) {
-					metricPrimGrid.v[k].alpha = x[k];
+					metricPrimGrid.v[k].alphaMinusOne = x[k];
 				}
 #else
 				Grid<MetricPrims, subDim> metricPrimGrid(sizev, (MetricPrims*)x); 
@@ -1332,7 +1332,7 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 		//jfnk.lineSearch = &JFNK::lineSearch_none;
 		jfnk.lineSearch = &JFNK::lineSearch_bisect;
 #ifdef CONVERGE_ALPHA_ONLY	
-		jfnk.lineSearchMaxIter = 250;
+		jfnk.lineSearchMaxIter = 20;//250;
 #else
 		jfnk.lineSearchMaxIter = 20;
 #endif
@@ -1383,7 +1383,7 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 
 #ifdef CONVERGE_ALPHA_ONLY
 		for (int i = 0; i < gridVolume; ++i) {
-			metricPrimGrid.v[i].alpha = alphas[i];
+			metricPrimGrid.v[i].alphaMinusOne = alphaMinusOnes[i];
 		}
 #endif
 
@@ -1437,11 +1437,34 @@ struct SphericalBody : public Body {
 
 //E_i = A_t,i - A_i,t
 //B_i = epsilon_i^jk A_k,j
-struct EMFieldBody : public Body {
-	//torus-shaped-something
-	//radius is the big radius of the torus
+
+//stress-energy of a uniform electric field in the x-direction
+struct EMUniformFieldBody : public Body {
+	using Body::Body;
+	virtual void initStressEnergyPrim(
+		Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
+		const Grid<Vector<real, subDim>, subDim>& xs
+	) {
+		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
+			StressEnergyPrims &stressEnergyPrims = stressEnergyPrimGrid(index);
+		
+			stressEnergyPrims.E(0) = 1;
+			stressEnergyPrims.E(1) = 0;
+			stressEnergyPrims.E(2) = 0;
+	
+			stressEnergyPrims.B(0) = 0;
+			stressEnergyPrims.B(1) = 0;
+			stressEnergyPrims.B(2) = 0;
+		});
+	}
+};
+
+struct EMLineBody : public Body {
 	using Body::Body;
 
+	//torus-shaped-something
+	//radius is the big radius of the torus
 	virtual void initStressEnergyPrim(
 		Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
 		const Grid<Vector<real, subDim>, subDim>& xs
@@ -1490,28 +1513,6 @@ struct EMFieldBody : public Body {
 	}
 };
 
-struct EMLineBody : public Body {
-	using Body::Body;
-
-	virtual void initStressEnergyPrim(
-		Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
-		const Grid<Vector<real, subDim>, subDim>& xs
-	) {
-		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
-		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
-			StressEnergyPrims &stressEnergyPrims = stressEnergyPrimGrid(index);
-		
-			stressEnergyPrims.E(0) = 1;
-			stressEnergyPrims.E(1) = 0;
-			stressEnergyPrims.E(2) = 0;
-	
-			stressEnergyPrims.B(0) = 0;
-			stressEnergyPrims.B(1) = 1;
-			stressEnergyPrims.B(2) = 0;
-		});
-	}
-};
-
 struct InitCond {
 	virtual void initMetricPrims(
 		Grid<MetricPrims, subDim>& metricPrimGrid,
@@ -1533,7 +1534,7 @@ struct FlatInitCond : public InitCond {
 		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
 			MetricPrims& metricPrims = metricPrimGrid(index);
-			metricPrims.alpha = 1;
+			metricPrims.alphaMinusOne = 0;
 			for (int i = 0; i < subDim; ++i) {
 				metricPrims.betaU(i) = 0;
 				for (int j = 0; j <= i; ++j) {
@@ -1578,9 +1579,11 @@ struct StellarSchwarzschildInitCond : public SphericalBodyInitCond {
 				for M = total mass 
 				and R = planet radius 
 			*/
-			metricPrims.alpha = r > radius 
-				? sqrt(1 - 2*mass/r)
-				: (1.5 * sqrt(1 - 2*mass/radius) - .5 * sqrt(1 - 2*mass*r*r/(radius*radius*radius)));
+			metricPrims.alphaMinusOne = (
+					r > radius 
+					? sqrt(1 - 2*mass/r)
+					: (1.5 * sqrt(1 - 2*mass/radius) - .5 * sqrt(1 - 2*mass*r*r/(radius*radius*radius)))
+				) - 1.;
 			
 			for (int i = 0; i < subDim; ++i) {
 				metricPrims.betaU(i) = 0;
@@ -1621,7 +1624,7 @@ struct StellarSchwarzschildInitCond : public SphericalBodyInitCond {
 			real omega = c;	//I'm trying to find a difference ...
 			real t = 0;	//where the position should be.  t=0 means the body is moved by [L, 0], and its derivatives are along [0, L omega] 
 			Vector<real,2> dt_xHat(L * omega * sin(omega * t), -L * omega * cos(omega * t));
-			dt_metricPrims.alpha = dr_alpha * (xi(0)/r * dt_xHat(0) + xi(1)/r * dt_xHat(1));
+			dt_metricPrims.alphaMinusOne = dr_alpha * (xi(0)/r * dt_xHat(0) + xi(1)/r * dt_xHat(1)) - 1.;
 			for (int i = 0; i < subDim; ++i) {
 				dt_metricPrims.betaU(i) = 0;
 			}
@@ -1723,8 +1726,8 @@ struct StellarKerrNewmanInitCond : public SphericalBodyInitCond {
 			https://arxiv.org/pdf/1503.02172.pdf section 3.11
 			https://arxiv.org/pdf/1410.2130.pdf section 4.2 last paragraph
 			*/
-			//metricPrims.alpha = 1./sqrt(1. + 2*H);
-			metricPrims.alpha = sqrt(1. - 2*H/(1+2*H) );
+			//metricPrims.alphaMinusOne = 1./sqrt(1. + 2*H) - 1.;
+			metricPrims.alphaMinusOne = sqrt(1. - 2*H/(1+2*H) ) - 1.;
 			
 			Vector<real,subDim> l( (r*x + a*y)/(r*r + a*a), (r*y - a*x)/(r*r + a*a), z/r );
 			for (int i = 0; i < subDim; ++i) {
@@ -1737,9 +1740,9 @@ struct StellarKerrNewmanInitCond : public SphericalBodyInitCond {
 	}
 };
 
-struct EMFieldInitCond : public FlatInitCond {
-	std::shared_ptr<EMFieldBody> body;	
-	EMFieldInitCond(std::shared_ptr<EMFieldBody> body_) : body(body_) {}
+struct EMUniformFieldInitCond : public FlatInitCond {
+	std::shared_ptr<EMUniformFieldBody> body;	
+	EMUniformFieldInitCond(std::shared_ptr<EMUniformFieldBody> body_) : body(body_) {}
 	//use flat initial metric prims for now
 };
 
@@ -1807,8 +1810,8 @@ int main(int argc, char** argv) {
 				return std::make_shared<SphericalBody>(sunRadius, sunMass);
 			}},
 		
-			{"em_field", [&](){
-				return std::make_shared<EMFieldBody>(2);
+			{"EMUniformField", [&](){
+				return std::make_shared<EMUniformFieldBody>(2);
 			}},
 			
 			{"em_line", [&](){
@@ -1918,10 +1921,10 @@ int main(int argc, char** argv) {
 				assert(sphericalBody);
 				return std::make_shared<StellarKerrNewmanInitCond>(sphericalBody);
 			}},
-			{"em_field", [&](){ 
-				std::shared_ptr<EMFieldBody> emFieldBody = std::dynamic_pointer_cast<EMFieldBody>(body);
+			{"EMUniformField", [&](){ 
+				std::shared_ptr<EMUniformFieldBody> emFieldBody = std::dynamic_pointer_cast<EMUniformFieldBody>(body);
 				assert(emFieldBody);
-				return std::make_shared<EMFieldInitCond>(emFieldBody);
+				return std::make_shared<EMUniformFieldInitCond>(emFieldBody);
 			}},
 			{"em_line", [&](){ 
 				std::shared_ptr<EMLineBody> emLineBody = std::dynamic_pointer_cast<EMLineBody>(body);
@@ -2060,7 +2063,7 @@ int main(int argc, char** argv) {
 			{"iz", [&](Vector<int,subDim> index)->real{ return index(2); }},
 			{"rho", [&](Vector<int,subDim> index)->real{ return stressEnergyPrimGrid(index).rho; }},
 			{"det-1", [&](Vector<int,subDim> index)->real{ return -1 + determinant33<real, TensorSLsub>(metricPrimGrid(index).gammaLL); }},
-			{"alpha-1", [&](Vector<int,subDim> index)->real{ return -1 + metricPrimGrid(index).alpha; }},
+			{"alpha-1", [&](Vector<int,subDim> index)->real{ return metricPrimGrid(index).alphaMinusOne; }},
 #if 0	//within 1e-23			
 			{"ortho_error", [&](Vector<int,subDim> index)->real{
 				const TensorSL &gLL = gLLs(index);

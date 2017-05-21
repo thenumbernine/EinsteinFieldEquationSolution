@@ -31,12 +31,11 @@ newton_gravity(r) = -m(r) / r**2 * c**2
 # now for kerr.
 # I'll just compute the gravity
 # there is no solution yet solved for the equations of structure inside a star using the Kerr metric
-theta = pi/2.										# polar angle
 angularVelocity = 2. * pi / (60. * 60. * 24.) / c	# angular velocity, in m^-1
 inertia = 2. / 5. * M * R**2						# moment of inertia about a sphere, in m^3
 angularMomentum = inertia * angularVelocity			# angular momentum in m^2
 earth_a = angularMomentum / M						# in m
 
 Delta(r,a) = r**2 - 2.*m(r) * r + a**2
-Sigma(r,a) = r**2 + a**2 * cos(theta)**2
-kerr_gravity(r,a) = -2.*m(r) * Delta(r,a) * (r**2 - a**2 * cos(theta)**2) / (2 * Sigma(r,a)**3) * c**2
+Sigma(r,a,theta) = r**2 + a**2 * cos(theta)**2
+kerr_gravity(r,a,theta) = -2.*m(r) * Delta(r,a) * (r**2 - a**2 * cos(theta)**2) / (2 * Sigma(r,a,theta)**3) * c**2

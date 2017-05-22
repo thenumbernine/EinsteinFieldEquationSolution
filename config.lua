@@ -7,6 +7,7 @@ size = 16
 -- 10*8^3 = 5120
 
 -- body specifies the radius of the problem, and the initial stress energy primitives
+--body = 'Null'
 --body = 'earth'
 --body = 'sun'
 body = 'EMUniformField'

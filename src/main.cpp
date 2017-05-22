@@ -3,6 +3,14 @@ instead of calculating the finite difference expression up front and extracting 
 how about using an iterative solver and only numerically calculating finite differences?
 might get into trouble ensuring the hamiltonian or momentum constraints are fulfilled.
 */
+
+namespace std {
+bool isfinite(__float128 f) {
+	double d = f;
+	return std::isfinite(d);
+}
+}
+
 #include "Tensor/Tensor.h"
 #include "Tensor/Grid.h"
 #include "Tensor/Inverse.h"
@@ -23,6 +31,8 @@ might get into trouble ensuring the hamiltonian or momentum constraints are fulf
 #include <iomanip>
 
 #define CONVERGE_ALPHA_ONLY
+//#define PRINTTIME
+//#define PRINT_RANGES
 
 const int numThreads = 8;
 Parallel::Parallel parallel(numThreads);
@@ -80,11 +90,9 @@ using namespace Tensor;
 //typedef float real;
 typedef double real;
 //typedef __float128 real;
+
 enum { subDim = 3 };	//spatial dim
 enum { dim = subDim+1 };
-
-template struct Solver::GMRES<real>;
-template struct Solver::JFNK<real>;
 
 std::ostream& operator<<(std::ostream& o, __float128 f) {
 	double d = f;
@@ -229,9 +237,11 @@ struct StressEnergyPrims {
 
 	StressEnergyPrims()
 	: rho(0), P(0), eInt(0)	//technically these should all be positive...
+	, useV(false)
+	, useEM(false)
 #ifdef USE_CHARGE_CURRENT_FOR_EM
 	,chargeDensity(0)
-#endif	
+#endif
 	{}
 };
 
@@ -348,9 +358,9 @@ assert(alpha != 0);
 			}
 		}
 
-		real dt_alpha = dt_metricPrims.alphaMinusOne + 1.;
+		real dt_alpha = dt_metricPrims.alphaMinusOne;
 		const TensorUsub& dt_betaU = dt_metricPrims.betaU;
-		TensorSLsub dt_gammaLL = dt_metricPrims.hLL + delta3LL;
+		TensorSLsub dt_gammaLL = dt_metricPrims.hLL;
 		
 		//g_ab,t
 		TensorSL &dt_gLL = dt_gLLs(index);
@@ -1275,6 +1285,14 @@ struct JFNK : public Solver::JFNK<real> {
 	size_t getN() const { return n; }
 };
 
+//scale input to keep solution from being zero 
+const double jfnkInputScale = 1;
+//const double jfnkInputScale = 8 * M_PI * c * c / G / 1000.;	//m -> g/cm^3
+
+//scale output to keep residual from being zero 
+const double jfnkOutputScale = 1; 
+//const double jfnkOutputScale = 8 * M_PI * c * c / G / 1000.;	//m -> g/cm^3
+
 //use JFNK
 //as soon as this passes 'restart' it explodes.
 struct JFNKSolver : public EFESolver {
@@ -1285,7 +1303,8 @@ struct JFNKSolver : public EFESolver {
 	JFNKSolver(int maxiter)
 	: Super(maxiter)
 	, EFEGrid(sizev)
-	{}
+	{
+	}
 
 	virtual void solve(
 		//input/output
@@ -1294,7 +1313,7 @@ struct JFNKSolver : public EFESolver {
 		const Grid<MetricPrims, subDim>& dt_metricPrimGrid,	//first deriv
 		const Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid
 	) {
-		
+	
 		std::ofstream jfnkFile("jfnk.txt");
 		jfnkFile << "#iter residual alpha" << std::endl;
 	
@@ -1307,6 +1326,8 @@ struct JFNKSolver : public EFESolver {
 		std::vector<real> alphaMinusOnes(gridVolume);
 		for (int i = 0; i < gridVolume; ++i) {
 			alphaMinusOnes[i] = metricPrimGrid.v[i].alphaMinusOne;
+			//scale up alphas before feeding them to the EFE constraint, so they are further from zero
+			alphaMinusOnes[i] *= jfnkInputScale;
 		}
 #endif
 		
@@ -1325,8 +1346,8 @@ struct JFNKSolver : public EFESolver {
 				//Grid<MetricPrims, subDim> metricPrimGrid(sizev);
 				for (int k = 0; k < gridVolume; ++k) {
 					metricPrimGrid.v[k].alphaMinusOne = x[k];
-					//scale things up here as well
-					//metricPrimGrid.v[k].alphaMinusOne *= (8. * M_PI) * c * c / G / 1000.;
+					//scale alphaMinusOne's back down now that we're inside the linear function 
+					metricPrimGrid.v[k].alphaMinusOne /= jfnkInputScale;
 				}
 #else
 				Grid<MetricPrims, subDim> metricPrimGrid(sizev, (MetricPrims*)x); 
@@ -1346,13 +1367,37 @@ struct JFNKSolver : public EFESolver {
 					gLLs, gUUs, dt_gLLs);
 #ifdef PRINTTIME
 				});
-				time("calculating Gamma^a_bc", [&](){
-#endif			
-				//Gamma^a_bc = 1/2 g^ad (g_db,c + g_dc,b - g_bc,d)
-				calc_GammaULLs(gLLs, gUUs, dt_gLLs, GammaULLs);
-#ifdef PRINTTIME
-				});
-				time("calculating G_ab = 8 pi T_ab", [&]{
+#endif
+
+#ifdef PRINT_RANGES
+				TensorSL gLL_mins, gLL_maxs;
+				TensorSU gUU_mins, gUU_maxs;
+				for (int a = 0; a < dim; ++a) {
+					for (int b = 0; b <= a; ++b) {
+						gLL_maxs(a,b) = -(gLL_mins(a,b) = std::numeric_limits<real>::infinity());
+						gUU_maxs(a,b) = -(gUU_mins(a,b) = std::numeric_limits<real>::infinity());
+					}
+				}
+				for (int k = 0; k < gridVolume; ++k) {
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b <= a; ++b) {
+							real d = gLLs.v[k](a,b);
+							gLL_mins(a,b) = std::min(gLL_mins(a,b), d);
+							gLL_maxs(a,b) = std::max(gLL_maxs(a,b), d);
+							
+							d = gUUs.v[k](a,b);
+							gUU_mins(a,b) = std::min(gUU_mins(a,b), d);
+							gUU_maxs(a,b) = std::max(gUU_maxs(a,b), d);
+							
+						}
+					}
+				}
+				std::cout << "gLL range: " << std::endl;
+				std::cout << " mins " << gLL_mins << std::endl;
+				std::cout << " maxs " << gLL_maxs << std::endl;
+				std::cout << "gUU range: " << std::endl;
+				std::cout << " mins " << gUU_mins << std::endl;
+				std::cout << " maxs " << gUU_maxs << std::endl;
 #endif
 
 #ifdef CONVERGE_ALPHA_ONLY
@@ -1366,6 +1411,190 @@ struct JFNKSolver : public EFESolver {
 				//R = g^ab R_ab
 				//R_ab = R^c_acb = (pick a more optimized implementation)
 				//R^c_acb = Gamma^c_ab,c - Gamma^c_ac,b + Gamma^c_dc Gamma^d_ab - Gamma^c_db Gamma^d_ac
+#ifdef PRINT_RANGES
+				
+				RangeObj<subDim> range(Vector<int,subDim>(), sizev);
+					
+				TensorUSL GammaULL_mins, GammaULL_maxs;
+				TensorSLL dgLLL_mins, dgLLL_maxs;
+				for (int a = 0; a < dim; ++a) {
+					for (int b = 0; b < dim; ++b) {
+						for (int c = 0; c <= b; ++c) {
+							GammaULL_maxs(a,b,c) = -(GammaULL_mins(a,b,c) = std::numeric_limits<real>::infinity());
+						}
+						for (int c = 0; c < dim; ++c) {
+							dgLLL_maxs(a,b,c) = -(dgLLL_mins(a,b,c) = std::numeric_limits<real>::infinity());
+						}
+					}
+				}
+						
+				std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
+				//parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
+					//derivatives of the metric in spatial coordinates using finite difference
+					//the templated method (1) stores derivative first and (2) only stores spatial
+					TensorLsubSL dgLLL3 = partialDerivative<partialDerivativeOrder, real, subDim, TensorSL>(
+						index, dx,
+						[&](Vector<int, subDim> index)
+							-> TensorSL
+						{
+							for (int i = 0; i < subDim; ++i) {
+								index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
+							}
+							return gLLs(index);
+						}
+					);
+					const TensorSL& dt_gLL = dt_gLLs(index);
+					TensorSLL dgLLL;
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b < dim; ++b) {	
+							dgLLL(a,b,0) = dt_gLL(a,b);
+							for (int i = 0; i < subDim; ++i) {
+								dgLLL(a,b,i+1) = dgLLL3(i,a,b);
+							}
+						}
+					}
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b < dim; ++b) {	
+							for (int c = 0; c < dim; ++c) {
+								real d = dgLLL(a,b,c);
+								dgLLL_mins(a,b,c) = std::min(dgLLL_mins(a,b,c), d);
+								dgLLL_maxs(a,b,c) = std::max(dgLLL_maxs(a,b,c), d);
+							}
+						}
+					}
+					
+					//connections
+					//TensorLSL& GammaLLL = GammaLLLs(index);
+					TensorLSL GammaLLL;
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b < dim; ++b) {
+							for (int c = 0; c <= b; ++c) {
+								GammaLLL(a,b,c) = .5 * (dgLLL(a,b,c) + dgLLL(a,c,b) - dgLLL(b,c,a));
+							}
+						}
+					}
+					
+					const TensorSU &gUU = gUUs(index);		
+					TensorUSL &GammaULL = GammaULLs(index);
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b < dim; ++b) {
+							for (int c = 0; c <= b; ++c) {
+								real sum = 0;
+								for (int d = 0; d < dim; ++d) {
+									sum += gUU(a,d) * GammaLLL(d,b,c);
+								}
+								GammaULL(a,b,c) = sum;
+							}
+						}
+					}
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b < dim; ++b) {
+							for (int c = 0; c <= b; ++c) {
+								real d = GammaULL(a,b,c);
+								GammaULL_mins(a,b,c) = std::min(GammaULL_mins(a,b,c), d);
+								GammaULL_maxs(a,b,c) = std::max(GammaULL_maxs(a,b,c), d);
+							}
+						}
+					}
+				});
+
+				std::cout << "dgLLL range: " << std::endl;
+				std::cout << " mins " << dgLLL_mins << std::endl;
+				std::cout << " maxs " << dgLLL_maxs << std::endl;
+				std::cout << "GammaULL range: " << std::endl;
+				std::cout << " mins " << GammaULL_mins << std::endl;
+				std::cout << " maxs " << GammaULL_maxs << std::endl;
+				
+				TensorSL EinsteinLL_mins, EinsteinLL_maxs;
+				TensorSL _8piT_LL_mins, _8piT_LL_maxs;
+				TensorSL EFE_mins, EFE_maxs;
+				for (int a = 0; a < dim; ++a) {
+					for (int b = 0; b <= a; ++b) {
+						EinsteinLL_maxs(a,b) = -(EinsteinLL_mins(a,b) = std::numeric_limits<real>::infinity());
+						_8piT_LL_maxs(a,b) = -(_8piT_LL_mins(a,b) = std::numeric_limits<real>::infinity());
+						EFE_maxs(a,b) = -(EFE_mins(a,b) = std::numeric_limits<real>::infinity());
+					}
+				}
+				
+				std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
+				//parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
+					//for the JFNK solver that doesn't cache the EinsteinLL tensors
+					// no need to allocate for both an EinsteinLL grid and a EFEGrid
+					TensorSL EinsteinLL = calc_EinsteinLL(index, gLLs, gUUs, GammaULLs);
+
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b <= a; ++b) {
+							real d = EinsteinLL(a,b);
+							EinsteinLL_mins(a,b) = std::min(EinsteinLL_mins(a,b), d);
+							EinsteinLL_maxs(a,b) = std::max(EinsteinLL_maxs(a,b), d);
+						}
+					}
+					
+					//now we want to find the zeroes of EinsteinLL(a,b) - 8 pi T(a,b)
+					// ... which is 10 zeroes ...
+					// ... and we are minimizing the inputs to our metric ...
+					// alpha, beta x3, gamma x6
+					// ... which is 10 variables
+					// tada!
+					TensorSL _8piT_LL = calc_8piTLL(
+						metricPrimGrid(index),
+						gLLs(index),
+						gUUs(index),
+						stressEnergyPrimGrid(index));
+
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b <= a; ++b) {
+							real d = _8piT_LL(a,b);
+							_8piT_LL_mins(a,b) = std::min(_8piT_LL_mins(a,b), d);
+							_8piT_LL_maxs(a,b) = std::max(_8piT_LL_maxs(a,b), d);
+						}
+					}
+
+
+					/*
+					now solve the linear system G_uv = G(g_uv) = 8 pi T_uv for g_uv 
+					i.e. A(x) = b, assuming A is linear ...
+					but it looks like, because T is based on g, it will really look like G(g_uv) = 8 pi T(g_uv, source terms)
+					*/
+					
+					TensorSL &EFE = EFEGrid(index);
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b <= a; ++b) {
+							EFE(a,b) = EinsteinLL(a,b) - _8piT_LL(a,b);
+						}
+					}
+				
+					for (int a = 0; a < dim; ++a) {
+						for (int b = 0; b <= a; ++b) {
+							real d = EFE(a,b);
+							EFE_mins(a,b) = std::min(EFE_mins(a,b), d);
+							EFE_maxs(a,b) = std::max(EFE_maxs(a,b), d);
+						}
+					}
+
+				});
+
+				std::cout << "EinsteinLL range: " << std::endl;
+				std::cout << " mins " << EinsteinLL_mins << std::endl;
+				std::cout << " maxs " << EinsteinLL_maxs << std::endl;
+				std::cout << "_8piT_LL range: " << std::endl;
+				std::cout << " mins " << _8piT_LL_mins << std::endl;
+				std::cout << " maxs " << _8piT_LL_maxs << std::endl;
+				std::cout << "EFE range: " << std::endl;
+				std::cout << " mins " << EFE_mins << std::endl;
+				std::cout << " maxs " << EFE_maxs << std::endl;
+				//exit(0);
+#else
+
+#ifdef PRINTTIME
+				time("calculating Gamma^a_bc", [&](){
+#endif			
+				//Gamma^a_bc = 1/2 g^ad (g_db,c + g_dc,b - g_bc,d)
+				calc_GammaULLs(gLLs, gUUs, dt_gLLs, GammaULLs);
+#ifdef PRINTTIME
+				});
+				time("calculating G_ab = 8 pi T_ab", [&]{
+#endif
 				calc_EFE_constraint(
 					metricPrimGrid,
 					stressEnergyPrimGrid,
@@ -1374,6 +1603,7 @@ struct JFNKSolver : public EFESolver {
 				});
 #endif
 
+#endif
 #ifdef CONVERGE_ALPHA_ONLY
 				for (int k = 0; k < gridVolume; ++k) {
 					real sum = 0;
@@ -1384,8 +1614,8 @@ struct JFNKSolver : public EFESolver {
 						}
 					}
 					y[k] = sum;
-					//scale things up here as well
-					//y[k] *= (8. * M_PI) * c * c / G / 1000.;
+					//scale up the EFE constraint here, so the residual gets a better value
+					y[k] *= jfnkOutputScale;
 				}
 #endif
 
@@ -1498,6 +1728,8 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 #ifdef CONVERGE_ALPHA_ONLY
 		for (int i = 0; i < gridVolume; ++i) {
 			metricPrimGrid.v[i].alphaMinusOne = alphaMinusOnes[i];
+			//scale back down the alphaMinusOnes now that we're done solving
+			metricPrimGrid.v[i].alphaMinusOne /= jfnkInputScale;
 		}
 #endif
 
@@ -1515,6 +1747,15 @@ struct Body {
 		Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
 		const Grid<Vector<real, subDim>, subDim>& xs
 	) = 0;
+};
+
+struct NullBody : public Body {
+	using Body::Body;
+
+	virtual void initStressEnergyPrim(
+		Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
+		const Grid<Vector<real, subDim>, subDim>& xs
+	) { }
 };
 
 struct SphericalBody : public Body {
@@ -1562,7 +1803,9 @@ struct EMUniformFieldBody : public Body {
 		RangeObj<subDim> range(Vector<int,subDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
 			StressEnergyPrims &stressEnergyPrims = stressEnergyPrimGrid(index);
-	
+
+			stressEnergyPrims.useEM = true; 
+
 			real volts = 100000;			//V
 			real dist = 0.1;				//m
 			real E = volts / dist;			//V / m
@@ -1913,6 +2156,10 @@ int main(int argc, char** argv) {
 			const char* name;
 			std::function<std::shared_ptr<Body>()> func;
 		} bodies[] = {
+			{"Null", [&](){
+				return std::make_shared<NullBody>(2);
+			}},
+			
 			{"earth", [&](){
 				const real earthRadius = 6.37101e+6;	// m
 				const real earthMass = 5.9736e+24 * G / c / c;	// m
@@ -1942,6 +2189,7 @@ int main(int argc, char** argv) {
 	
 		for (p = bodies; p < endof(bodies); ++p) {
 			if (p->name == bodyName) {
+std::cout << "creating body " << bodyName << std::endl;				
 				body = p->func();
 				break;
 			}

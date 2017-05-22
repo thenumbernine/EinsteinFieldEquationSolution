@@ -18,6 +18,9 @@ might get into trouble ensuring the hamiltonian or momentum constraints are fulf
 #include "LuaCxx/Ref.h"
 #include <functional>
 #include <chrono>
+#include <fstream>
+#include <iostream>
+#include <iomanip>
 
 #define CONVERGE_ALPHA_ONLY
 
@@ -74,9 +77,19 @@ Tensor<Real, Upper<3>> cross(Tensor<Real, Upper<3>> a, Tensor<Real, Upper<3>> b)
 
 using namespace Tensor;
 
+//typedef float real;
 typedef double real;
+//typedef __float128 real;
 enum { subDim = 3 };	//spatial dim
 enum { dim = subDim+1 };
+
+template struct Solver::GMRES<real>;
+template struct Solver::JFNK<real>;
+
+std::ostream& operator<<(std::ostream& o, __float128 f) {
+	double d = f;
+	return o << d;
+}
 
 //subDim
 typedef ::Tensor::Tensor<real, Lower<subDim>> TensorLsub;
@@ -1107,15 +1120,15 @@ for (int i = 0; i < (int)getN(); ++i) {
 		);
 		
 		//seems this is stopping too early, so try scaling both x and y ... or at least the normal that is used ...
-#if 0		
+#if 0
 		krylov->MInv = [&](real* y, const real* x) {
-			for (int i = 0; i < krylov->n; ++i) {
-				y[i] = x[i] * c * c;
+			for (int i = 0; i < (int)getN(); ++i) {
+				y[i] = x[i] / (8. * M_PI) * c * c / G / 1000.;
 			}
 		};
 #endif		
 		krylov->stopCallback = [&]()->bool{
-			printf("%s iter %d residual %.49e\n", name(), krylov->getIter(), krylov->getResidual());
+			std::cout << name() << " iter " << krylov->getIter() << " residual " << krylov->getResidual() << std::endl;
 			return false;
 		};
 		time("solving", [&](){
@@ -1248,7 +1261,7 @@ struct JFNK : public Solver::JFNK<real> {
 		for (int i = 0; i < (int)n; ++i) {
 			sum += r[i] * r[i];
 		}
-#if 1
+#if 0
 		real residual = sqrt(sum) / (8. * M_PI) * c * c / G / 1000.;
 #endif
 		std::cout << "JFNK::calcResidual"
@@ -1282,11 +1295,11 @@ struct JFNKSolver : public EFESolver {
 		const Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid
 	) {
 		
-		FILE* jfnkFile = fopen("jfnk.txt", "w");
-		fprintf(jfnkFile, "#iter residual alpha\n");
+		std::ofstream jfnkFile("jfnk.txt");
+		jfnkFile << "#iter residual alpha" << std::endl;
 	
-		FILE* gmresFile = fopen("gmres.txt", "w");
-		fprintf(gmresFile, "#jfnk_iter gmres_iter residual\n");
+		std::ofstream gmresFile("gmres.txt");
+		gmresFile << "#jfnk_iter gmres_iter residual" << std::endl;
 		
 		assert(sizeof(MetricPrims) == sizeof(EFEGrid.v[0]));	//this should be 10 real numbers and nothing else
 		
@@ -1312,6 +1325,8 @@ struct JFNKSolver : public EFESolver {
 				//Grid<MetricPrims, subDim> metricPrimGrid(sizev);
 				for (int k = 0; k < gridVolume; ++k) {
 					metricPrimGrid.v[k].alphaMinusOne = x[k];
+					//scale things up here as well
+					//metricPrimGrid.v[k].alphaMinusOne *= (8. * M_PI) * c * c / G / 1000.;
 				}
 #else
 				Grid<MetricPrims, subDim> metricPrimGrid(sizev, (MetricPrims*)x); 
@@ -1369,6 +1384,8 @@ struct JFNKSolver : public EFESolver {
 						}
 					}
 					y[k] = sum;
+					//scale things up here as well
+					//y[k] *= (8. * M_PI) * c * c / G / 1000.;
 				}
 #endif
 
@@ -1408,19 +1425,19 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 });
 #endif	//debug output
 			},
-			1e-50, 				//newton stop epsilon
+			1e-20, 				//newton stop epsilon
 			maxiter, 			//newton max iter
 			[&](size_t n, real* x, real* b, JFNK::Func A) -> std::shared_ptr<Solver::Krylov<real>> {
 				return std::make_shared<GMRES>(
 					n, x, b, A,
-					1e-50, 				//gmres stop epsilon
+					1e-20, 				//gmres stop epsilon
 					n, //n*10,				//gmres max iter
 					gmresRestart		//gmres restart iter
 				);
 			}
 		);
 		jfnk.jacobianEpsilon = 1e-6;
-		jfnk.maxAlpha = 1;
+		jfnk.maxAlpha = .001;
 		//jfnk.lineSearch = &JFNK::lineSearch_none;
 		jfnk.lineSearch = &JFNK::lineSearch_bisect;
 #ifdef CONVERGE_ALPHA_ONLY	
@@ -1429,12 +1446,16 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 		jfnk.lineSearchMaxIter = 20;
 #endif
 		jfnk.stopCallback = [&]()->bool{
-			std::cout << "jfnk iter=" << jfnk.getIter() << " alpha=" << jfnk.getAlpha() << " residual=" << jfnk.getResidual() << std::endl;
+			std::cout << "jfnk iter=" << jfnk.getIter() 
+				<< " alpha=" << jfnk.getAlpha() 
+				<< " residual=" << std::setprecision(49) << jfnk.getResidual() << std::setprecision(6) 
+				<< std::endl;
 			
-			fprintf(jfnkFile, "%d\t%.16f\t%f\n", jfnk.getIter(), jfnk.getResidual(), jfnk.getAlpha());
-			fflush(jfnkFile);
-			fprintf(gmresFile, "\n");
-			fflush(gmresFile);
+			jfnkFile << jfnk.getIter() 
+				<< "\t" << std::setprecision(16) << jfnk.getResidual() << std::setprecision(6)
+				<< "\t" << jfnk.getAlpha()
+				<< std::endl;
+			gmresFile << std::endl;
 			
 			return false;
 		};
@@ -1455,12 +1476,13 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 				<< " residual=" << gmres->getResidual() 
 				<< std::endl;
 			
-			fprintf(gmresFile, "%d\t%d\t%.16f\n", jfnk.getIter(), gmres->getIter(), gmres->getResidual());
-			fflush(gmresFile);
+			gmresFile << jfnk.getIter()
+				<< "\t" << gmres->getIter()
+				<< "\t" << std::setprecision(16) << gmres->getResidual() << std::setprecision(6)
+				<< std::endl;
 			
 			return false;
 		};
-//when I enable preconditioners, my gmres residual oscillates between near-zero and 10^15
 //I don't think I've ever tested preconditioners ...
 #if 0
 		gmres->MInv = [&](real* y, const real* x) {
@@ -1479,8 +1501,8 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 		}
 #endif
 
-		fclose(jfnkFile);
-		fclose(gmresFile);
+		jfnkFile.close();
+		gmresFile.close();
 	}
 };
 
@@ -1879,7 +1901,9 @@ int main(int argc, char** argv) {
 	std::cout << "size=" << size << std::endl;
 
 	real bodyRadii = 2;
-	if (!lua["bodyRadii"].isNil()) lua["bodyRadii"] >> bodyRadii;
+	if (!lua["bodyRadii"].isNil()) {
+		double d = bodyRadii; lua["bodyRadii"] >> d; bodyRadii = d;
+	}
 	std::cout << "bodyRadii=" << bodyRadii << std::endl;
 
 
@@ -2231,32 +2255,32 @@ int main(int argc, char** argv) {
 			std::string outputFilename;
 			lua["outputFilename"] >> outputFilename;
 
-			FILE* file = fopen(outputFilename.c_str(), "w");
-			if (!file) throw Common::Exception() << "failed to open file " << outputFilename;
+			std::ofstream file(outputFilename);
+			if (!file.good()) throw Common::Exception() << "failed to open file " << outputFilename;
 
-			fprintf(file, "#");
+			file << "#";
 			{
 				const char* tab = "";
 				for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {
-					fprintf(file, "%s%s", tab, p->name.c_str());
+					file << tab << p->name;
 					tab = "\t";
 				}
 			}
-			fprintf(file, "\n");
+			file << std::endl;
 			time("outputting", [&]{
 				//this is printing output, so don't do it in parallel		
 				RangeObj<subDim> range(Vector<int,subDim>(), sizev);
 				for (RangeObj<subDim>::iterator iter = range.begin(); iter != range.end(); ++iter) {
 					const char* tab = "";
 					for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {
-						fprintf(file, "%s%.16e", tab, p->func(iter.index));
+						file << tab << std::setprecision(16) << p->func(iter.index) << std::setprecision(6);
 						tab = "\t";
 					}
-					fprintf(file, "\n");
+					file << std::endl;
 				}
 			});
-		
-			fclose(file);
+			
+			file.close();
 		}
 	}
 

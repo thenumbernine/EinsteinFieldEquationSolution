@@ -231,8 +231,9 @@ void main() {
 
 	glreport'here'
 
-	print('min',self.min:unpack())
-	print('max',self.max:unpack())
+	for i,name in ipairs(colnames) do
+		print(name, self.min[i], self.max[i])
+	end
 
 	gl.glEnable(gl.GL_DEPTH_TEST)
 end

@@ -2,3 +2,4 @@ distName='EFESoln'
 distType='app'
 depends:append{'../Common', '../Tensor', '../Solver', '../LuaCxx', '../Parallel'}
 pthread = true
+compileFlags = compileFlags .. ' -mlong-double-128'

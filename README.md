@@ -48,7 +48,7 @@ This is not a correct equation of structure for the Kerr metric, as the correct 
 
 ---
 
-![alt text]({images/kerr with vs. without rotation.png})
+![alt text](images/kerr%20with%20vs.%20without%20rotation.png)
 
 Difference between Kerr metric with and without rotation.
 Note that Kerr without rotation exhibits less gravitational acceleration than Kerr with rotation, while Schwarzschild (which is rotation-less) exhibits more gravitational acceleration than Kerr. 

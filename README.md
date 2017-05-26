@@ -33,18 +33,18 @@ Schwarzschild-based equations of structure with exhaggerated density.
 
 ---
 
-![alt text](images/schwarzschild_gravity.png)
+![alt text](images/gravity%20models.png)
 
-Schwarzschild-based EOS gravity using Earth's parameters.
-Taken from Misner, Thorne, and Wheeler's "Gravitation" box 23.2 on the TOV equations of structure starting from a Schwarzschild metric. 
+Newton, Schwarzschild-based EOS gravity using Earth's parameters, and Kerr-based EOS gravity.
+Schwarzschild-based EOS is taken from Misner, Thorne, and Wheeler's "Gravitation" box 23.2 on the TOV equations of structure starting from a Schwarzschild metric. 
+Note that the Kerr metric is approximated within the body as the Kerr metric, using for mass all matter contained within the radial coordinate.
+This is not a correct equation of structure for the Kerr metric, as the correct Kerr EOS has not yet been solved for.
 
 ---
 
-![alt text](images/gravity_differences.png)
+![alt text](images/gravity%20differences.png)
 
 Differences in between various gravity models, using Earth's parameters.
-Note that the Kerr metric is approximated within the body as the Kerr metric, using for mass all matter contained within the radial coordinate.
-This is not a correct equation of structure for the Kerr metric, as the correct Kerr EOS has not yet been solved for.
 
 ---
 

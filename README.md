@@ -12,8 +12,8 @@ goals:
 * 3. (CHECK) verify Schwarzschild stellar model gravity due to finite difference matches the analytical connection equation values
 * 4. (CHECK) verify, with flat spacetime and stellar stress-energy, that the EFE constraint error is equal to the stellar body stress-energy within the body, and zero elsewhere.
 * 5. (CHECK) verify, with Schwarzschild stellar model and stellar stress-energy, that the EFE constraint is near zero everywhere. ... well this works inside the planet and outside the planet, but on the changes in rho this has some numerical errors.
-* add time 2nd derivatives to metric prims, from this compute time derivatives of connections, from that the Riemann, and then the Ricci and Einstein
-* 6. get JFNK to work.
+* 6. (CHECK) add time 2nd derivatives to metric prims, from this compute time derivatives of connections, from that the Riemann, and then the Ricci and Einstein
+* 6. (sort of) get JFNK to work.
 	My goal is to start at flat space, given Earth's stress-energy source term, and come up with Earth's gravity, as the Schwarzschild analytical answer already gives us.
 	I am getting descent, however it is going really slow, so I'm going to port this project to OpenCL...
 

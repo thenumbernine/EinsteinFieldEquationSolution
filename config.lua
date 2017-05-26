@@ -1,8 +1,8 @@
 -- grid size
 --size = 1
 --size = 4
-size = 8
---size = 16
+--size = 8
+size = 16
 --size = 64
 -- 10*8^3 = 5120
 

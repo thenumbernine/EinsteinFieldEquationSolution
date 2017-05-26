@@ -37,9 +37,9 @@ ostream& operator<<(ostream& o, __float128 f) {
 #include <chrono>
 #include <iomanip>
 
-#define CONVERGE_ALPHA_ONLY
+//#define CONVERGE_ALPHA_ONLY
 //#define PRINTTIME
-//#define PRINT_RANGES
+#define PRINT_RANGES
 
 const int numThreads = 8;
 Parallel::Parallel parallel(numThreads);
@@ -119,6 +119,7 @@ typedef ::Tensor::Tensor<real, Upper<dim>, Lower<dim>> TensorUL;
 typedef ::Tensor::Tensor<real, Upper<dim>, Upper<dim>> TensorUU;
 typedef ::Tensor::Tensor<real, Lower<dim>, Symmetric<Lower<dim>, Lower<dim>>> TensorLSL;
 typedef ::Tensor::Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>> TensorUSL;
+typedef ::Tensor::Tensor<real, Upper<dim>, Lower<dim>, Lower<dim>> TensorULL;
 typedef ::Tensor::Tensor<real, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> TensorSLL;
 typedef ::Tensor::Tensor<real, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> TensorUSLL;
 typedef ::Tensor::Tensor<real, Upper<dim>, Lower<dim>, Lower<dim>, Lower<dim>> TensorULLL;
@@ -127,6 +128,7 @@ typedef ::Tensor::Tensor<real, Symmetric<Lower<dim>, Lower<dim>>, Symmetric<Lowe
 //mixed subDim & dim
 typedef ::Tensor::Tensor<real, Lower<subDim>, Symmetric<Lower<dim>, Lower<dim>>> TensorLsubSL;
 typedef ::Tensor::Tensor<real, Lower<subDim>, Upper<dim>, Symmetric<Lower<dim>, Lower<dim>>> TensorLsubUSL;
+typedef ::Tensor::Tensor<real, Lower<subDim>, Symmetric<Lower<dim>, Lower<dim>>, Lower<dim>> TensorLsubSLL;
 
 template<typename T>
 struct gridFromPtr {
@@ -541,6 +543,9 @@ TensorSL calc_EinsteinLL(
 	const Grid<TensorSU, subDim>& gUUs,
 	const Grid<TensorUSL, subDim>& GammaULLs
 ) {
+	const TensorSU &gUU = gUUs(index);
+	const TensorSLL& dgLLL = dgLLLs(index);
+	const TensorUSL &GammaULL = GammaULLs(index);
 #if 0	//calc first derivative of Gamma^a_bc's
 	//connection derivative
 	TensorLsubUSL dGammaLULL3 = partialDerivative<partialDerivativeOrder, real, subDim, TensorUSL>(
@@ -551,7 +556,6 @@ TensorSL calc_EinsteinLL(
 
 //debugging
 #ifdef DEBUG
-const TensorUSL& GammaULL = GammaULLs(index);
 for (int i = 0; i < dim; ++i) {
 	for (int j = 0; j < dim; ++j) {
 		for (int k = 0; k <= j; ++k) {
@@ -563,7 +567,6 @@ for (int i = 0; i < dim; ++i) {
 			return GammaULLs(index);
 		});
 	
-	//const TensorSU &gUU = gUUs(index);
 	//const TensorSU& dt_gUU = dt_gUUs(index);
 	//const TensorLSL& GammaLLL = GammaLLLs(index);
 
@@ -594,8 +597,6 @@ Gamma^a_bc,d = 1/2 (g^ae (g_eb,c + g_ec,b - g_bc,e)),d
 	= g^ae_,d Gamma_ebc + 1/2 g^ae (g_eb,cd + g_ec,bd - g_bc,ed)
 	= -g^ae g_ef,d Gamma^f_bc + 1/2 g^ae (g_eb,cd + g_ec,bd - g_bc,ed)
 */
-	const TensorSLL& dgLLL = dgLLLs(index);
-
 	//g^ae g_ef,d
 	TensorULL gdgULL;
 	for (int a = 0; a < 4; ++a) {
@@ -611,11 +612,10 @@ Gamma^a_bc,d = 1/2 (g^ae (g_eb,c + g_ec,b - g_bc,e)),d
 	}
 
 	//g_ab,ci
-	TensorLsubSLL d2gLLLL3;
-	TensorLsubSL d2gLLLL3 = partialDerivative<partialDerivativeOrder, real, subDim, TensorLSL>(
+	TensorLsubSLL d2gLLLL3 = partialDerivative<partialDerivativeOrder, real, subDim, TensorSLL>(
 		index, dx,
 		[&](Vector<int, subDim> index)
-			-> TensorLSL
+			-> TensorSLL
 		{
 			for (int i = 0; i < subDim; ++i) {
 				index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
@@ -638,7 +638,19 @@ Gamma^a_bc,d = 1/2 (g^ae (g_eb,c + g_ec,b - g_bc,e)),d
 							//c or d is 0 = time?  then we need dt2_gLL ...
 							d2gLLLL(a,b,c,d) = d2t_gLL(a,b);
 						} else {
-#error finishme
+							Vector<int, subDim> ixp = index;
+							ixp(c) = std::min(ixp(c) + 1, sizev(c)-1);
+							Vector<int, subDim> ixm = index;
+							ixm(c) = std::max(ixm(c) - 1, 0);
+							
+							const TensorSLL& dgLLL_ix = dgLLLs(index);
+							const TensorSLL& dgLLL_ixp = dgLLLs(ixp);
+							const TensorSLL& dgLLL_ixm = dgLLLs(ixm);
+							
+							d2gLLLL(a,b,c,d) = 
+								(dgLLL_ixp(a,b,c) 
+								- dgLLL_ix(a,b,c) * 2.
+								+ dgLLL_ixm(a,b,c)) / (dx(c-1) * dx(c-1));
 						}
 					} else {
 						//then do a 1st deriv
@@ -650,7 +662,7 @@ Gamma^a_bc,d = 1/2 (g^ae (g_eb,c + g_ec,b - g_bc,e)),d
 	}
 
 	//Gamma^a_bcd = -g^ae g_ef,d Gamma^f_bc + 1/2 g^ae (g_eb,cd + g_ec,bd - g_bc,ed)
-	TensorUSLL dGammaUSLL;
+	TensorUSLL dGammaULLL;
 	for (int a = 0; a < 4; ++a) {
 		for (int b = 0; b < 4; ++b) {
 			for (int c = 0; c < 4; ++c) {
@@ -668,7 +680,6 @@ Gamma^a_bc,d = 1/2 (g^ae (g_eb,c + g_ec,b - g_bc,e)),d
 		}
 	}
 #endif
-	const TensorUSL &GammaULL = GammaULLs(index);
 #if 0	//calculate the Riemann, then the Ricci
 	TensorULLL GammaSqULLL;
 	for (int a = 0; a < dim; ++a) {
@@ -759,7 +770,6 @@ assert(RicciLL(a,b) == RicciLL(a,b));
 	}
 #endif
 	
-	const TensorSU &gUU = gUUs(index);
 	real Gaussian = 0;
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b < dim; ++b) {
@@ -1247,7 +1257,7 @@ struct ConjGradSolver : public KrylovSolver {
 			(real*)metricPrimGrid.v,
 			(const real*)_8piTLLs.v,
 			[&](real* y, const real* x) { linearFunc(y, x, dt_metricPrimGrid); },
-			1e-30,	//epsilon
+			1e-100,	//epsilon
 			getN()	//maxiter
 		);
 	}
@@ -1288,7 +1298,7 @@ struct ConjResSolver : public KrylovSolver {
 			(real*)metricPrimGrid.v,
 			(const real*)_8piTLLs.v,
 			[&](real* y, const real* x) { linearFunc(y, x, dt_metricPrimGrid); },
-			1e-30,	//epsilon
+			1e-100,	//epsilon
 			getN()	//maxiter
 		);
 	}
@@ -1338,7 +1348,7 @@ struct GMRESSolver : public KrylovSolver {
 			(real*)metricPrimGrid.v,		//x = state vector
 			(const real*)_8piTLLs.v,		//b = solution vector
 			[&](real* y, const real* x) { linearFunc(y, x, dt_metricPrimGrid); },	//A = linear function to solve x for A(x) = b
-			1e-30,			//epsilon
+			1e-100,			//epsilon
 			getN(),			//maxiter ... = n^3 ... 262144
 			100				//restart
 		);
@@ -1366,8 +1376,8 @@ struct JFNK : public Solver::JFNK<real> {
 		std::cout << "JFNK::calcResidual"
 			<< " n=" << n
 			<< " iter=" << iter
-			<< " alpha=" << alpha
-			<< " residual=" << residual 
+			<< " alpha=" << std::setprecision(49) << alpha << std::setprecision(6)
+			<< " residual=" << std::setprecision(49) << residual  << std::setprecision(6)
 			<< std::endl;
 		return residual;
 	}
@@ -1450,37 +1460,6 @@ struct JFNKSolver : public EFESolver {
 				});
 #endif
 
-#ifdef PRINT_RANGES
-				TensorSL gLL_mins, gLL_maxs;
-				TensorSU gUU_mins, gUU_maxs;
-				for (int a = 0; a < dim; ++a) {
-					for (int b = 0; b <= a; ++b) {
-						gLL_maxs(a,b) = -(gLL_mins(a,b) = std::numeric_limits<real>::infinity());
-						gUU_maxs(a,b) = -(gUU_mins(a,b) = std::numeric_limits<real>::infinity());
-					}
-				}
-				for (int k = 0; k < gridVolume; ++k) {
-					for (int a = 0; a < dim; ++a) {
-						for (int b = 0; b <= a; ++b) {
-							real d = gLLs.v[k](a,b);
-							gLL_mins(a,b) = std::min(gLL_mins(a,b), d);
-							gLL_maxs(a,b) = std::max(gLL_maxs(a,b), d);
-							
-							d = gUUs.v[k](a,b);
-							gUU_mins(a,b) = std::min(gUU_mins(a,b), d);
-							gUU_maxs(a,b) = std::max(gUU_maxs(a,b), d);
-							
-						}
-					}
-				}
-				std::cout << "gLL range: " << std::endl;
-				std::cout << " mins " << gLL_mins << std::endl;
-				std::cout << " maxs " << gLL_maxs << std::endl;
-				std::cout << "gUU range: " << std::endl;
-				std::cout << " mins " << gUU_mins << std::endl;
-				std::cout << " maxs " << gUU_maxs << std::endl;
-#endif
-
 #ifdef PRINTTIME
 				time("calculating Gamma^a_bc", [&](){
 #endif			
@@ -1501,115 +1480,6 @@ struct JFNKSolver : public EFESolver {
 				//R = g^ab R_ab
 				//R_ab = R^c_acb = (pick a more optimized implementation)
 				//R^c_acb = Gamma^c_ab,c - Gamma^c_ac,b + Gamma^c_dc Gamma^d_ab - Gamma^c_db Gamma^d_ac
-#ifdef PRINT_RANGES
-				
-				RangeObj<subDim> range(Vector<int,subDim>(), sizev);
-					
-				TensorUSL GammaULL_mins, GammaULL_maxs;
-				for (int a = 0; a < dim; ++a) {
-					for (int b = 0; b < dim; ++b) {
-						for (int c = 0; c <= b; ++c) {
-							GammaULL_maxs(a,b,c) = -(GammaULL_mins(a,b,c) = std::numeric_limits<real>::infinity());
-						}
-					}
-				}
-				std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
-				//parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
-					for (int a = 0; a < dim; ++a) {
-						for (int b = 0; b < dim; ++b) {
-							for (int c = 0; c <= b; ++c) {
-								real d = GammaULLs(index)(a,b,c);
-								GammaULL_mins(a,b,c) = std::min(GammaULL_mins(a,b,c), d);
-								GammaULL_maxs(a,b,c) = std::max(GammaULL_maxs(a,b,c), d);
-							}
-						}
-					}
-				});
-				std::cout << "GammaULL range: " << std::endl;
-				std::cout << " mins " << GammaULL_mins << std::endl;
-				std::cout << " maxs " << GammaULL_maxs << std::endl;
-				
-				TensorSL EinsteinLL_mins, EinsteinLL_maxs;
-				TensorSL _8piT_LL_mins, _8piT_LL_maxs;
-				TensorSL EFE_mins, EFE_maxs;
-				for (int a = 0; a < dim; ++a) {
-					for (int b = 0; b <= a; ++b) {
-						EinsteinLL_maxs(a,b) = -(EinsteinLL_mins(a,b) = std::numeric_limits<real>::infinity());
-						_8piT_LL_maxs(a,b) = -(_8piT_LL_mins(a,b) = std::numeric_limits<real>::infinity());
-						EFE_maxs(a,b) = -(EFE_mins(a,b) = std::numeric_limits<real>::infinity());
-					}
-				}
-				
-				std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
-				//parallel.foreach(range.begin(), range.end(), [&](const Vector<int, subDim>& index) {
-					//for the JFNK solver that doesn't cache the EinsteinLL tensors
-					// no need to allocate for both an EinsteinLL grid and a EFEGrid
-					TensorSL EinsteinLL = calc_EinsteinLL(index, gLLs, gUUs, GammaULLs);
-
-					for (int a = 0; a < dim; ++a) {
-						for (int b = 0; b <= a; ++b) {
-							real d = EinsteinLL(a,b);
-							EinsteinLL_mins(a,b) = std::min(EinsteinLL_mins(a,b), d);
-							EinsteinLL_maxs(a,b) = std::max(EinsteinLL_maxs(a,b), d);
-						}
-					}
-					
-					//now we want to find the zeroes of EinsteinLL(a,b) - 8 pi T(a,b)
-					// ... which is 10 zeroes ...
-					// ... and we are minimizing the inputs to our metric ...
-					// alpha, beta x3, gamma x6
-					// ... which is 10 variables
-					// tada!
-					TensorSL _8piT_LL = calc_8piTLL(
-						metricPrimGrid(index),
-						gLLs(index),
-						gUUs(index),
-						stressEnergyPrimGrid(index));
-
-					for (int a = 0; a < dim; ++a) {
-						for (int b = 0; b <= a; ++b) {
-							real d = _8piT_LL(a,b);
-							_8piT_LL_mins(a,b) = std::min(_8piT_LL_mins(a,b), d);
-							_8piT_LL_maxs(a,b) = std::max(_8piT_LL_maxs(a,b), d);
-						}
-					}
-
-
-					/*
-					now solve the linear system G_uv = G(g_uv) = 8 pi T_uv for g_uv 
-					i.e. A(x) = b, assuming A is linear ...
-					but it looks like, because T is based on g, it will really look like G(g_uv) = 8 pi T(g_uv, source terms)
-					*/
-					
-					TensorSL &EFE = EFEGrid(index);
-					for (int a = 0; a < dim; ++a) {
-						for (int b = 0; b <= a; ++b) {
-							EFE(a,b) = EinsteinLL(a,b) - _8piT_LL(a,b);
-						}
-					}
-				
-					for (int a = 0; a < dim; ++a) {
-						for (int b = 0; b <= a; ++b) {
-							real d = EFE(a,b);
-							EFE_mins(a,b) = std::min(EFE_mins(a,b), d);
-							EFE_maxs(a,b) = std::max(EFE_maxs(a,b), d);
-						}
-					}
-
-				});
-
-				std::cout << "EinsteinLL range: " << std::endl;
-				std::cout << " mins " << EinsteinLL_mins << std::endl;
-				std::cout << " maxs " << EinsteinLL_maxs << std::endl;
-				std::cout << "_8piT_LL range: " << std::endl;
-				std::cout << " mins " << _8piT_LL_mins << std::endl;
-				std::cout << " maxs " << _8piT_LL_maxs << std::endl;
-				std::cout << "EFE range: " << std::endl;
-				std::cout << " mins " << EFE_mins << std::endl;
-				std::cout << " maxs " << EFE_maxs << std::endl;
-				
-				exit(0);
-#else
 
 #ifdef PRINTTIME
 				time("calculating G_ab = 8 pi T_ab", [&]{
@@ -1620,8 +1490,6 @@ struct JFNKSolver : public EFESolver {
 					EFEGrid);
 #ifdef PRINTTIME
 				});
-#endif
-
 #endif
 
 //scale up the EFE constraint here, so the residual gets a better value
@@ -1684,12 +1552,12 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 });
 #endif	//debug output
 			},
-			1e-50, 				//newton stop epsilon
+			1e-100, 				//newton stop epsilon
 			maxiter, 			//newton max iter
 			[&](size_t n, real* x, real* b, JFNK::Func A) -> std::shared_ptr<Solver::Krylov<real>> {
 				return std::make_shared<GMRES>(
 					n, x, b, A,
-					1e-50,	 				//gmres stop epsilon
+					1e-100,	 				//gmres stop epsilon
 					n, //n*10,				//gmres max iter
 					gmresRestart			//gmres restart iter
 				);
@@ -1700,19 +1568,82 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 		//jfnk.lineSearch = &JFNK::lineSearch_none;
 		jfnk.lineSearch = &JFNK::lineSearch_bisect;
 #ifdef CONVERGE_ALPHA_ONLY	
-		jfnk.lineSearchMaxIter = 250;
+		jfnk.lineSearchMaxIter = 50;
 #else
 		jfnk.lineSearchMaxIter = 20;
 #endif
 		jfnk.stopCallback = [&]()->bool{
+			
+#ifdef PRINT_RANGES
+			TensorSL gLL_mins, gLL_maxs;
+			TensorSU gUU_mins, gUU_maxs;
+			TensorUSL GammaULL_mins, GammaULL_maxs;
+			TensorSL EFE_mins, EFE_maxs;
+			//TODO store EinsteinLL and _8piT_LL so I can see ranges on those too
+			for (int a = 0; a < dim; ++a) {
+				for (int b = 0; b <= a; ++b) {
+					gLL_maxs(a,b) = -(gLL_mins(a,b) = std::numeric_limits<real>::infinity());
+					gUU_maxs(a,b) = -(gUU_mins(a,b) = std::numeric_limits<real>::infinity());
+					EFE_maxs(a,b) = -(EFE_mins(a,b) = std::numeric_limits<real>::infinity());
+				}
+			}
+			for (int a = 0; a < dim; ++a) {
+				for (int b = 0; b < dim; ++b) {
+					for (int c = 0; c <= b; ++c) {
+						GammaULL_maxs(a,b,c) = -(GammaULL_mins(a,b,c) = std::numeric_limits<real>::infinity());
+					}
+				}
+			}
+			for (int k = 0; k < gridVolume; ++k) {
+				for (int a = 0; a < dim; ++a) {
+					for (int b = 0; b <= a; ++b) {
+						real d = gLLs.v[k](a,b);
+						gLL_mins(a,b) = std::min(gLL_mins(a,b), d);
+						gLL_maxs(a,b) = std::max(gLL_maxs(a,b), d);
+						
+						d = gUUs.v[k](a,b);
+						gUU_mins(a,b) = std::min(gUU_mins(a,b), d);
+						gUU_maxs(a,b) = std::max(gUU_maxs(a,b), d);
+						
+						d = EFEGrid.v[k](a,b);
+						EFE_mins(a,b) = std::min(EFE_mins(a,b), d);
+						EFE_maxs(a,b) = std::max(EFE_maxs(a,b), d);
+					}
+				}
+				for (int a = 0; a < dim; ++a) {
+					for (int b = 0; b < dim; ++b) {
+						for (int c = 0; c <= b; ++c) {
+							real d = GammaULLs.v[k](a,b,c);
+							GammaULL_mins(a,b,c) = std::min(GammaULL_mins(a,b,c), d);
+							GammaULL_maxs(a,b,c) = std::max(GammaULL_maxs(a,b,c), d);
+						}
+					}
+				}
+			}
+			std::cout << "gLL range: " << std::endl;
+			std::cout << " mins " << gLL_mins << std::endl;
+			std::cout << " maxs " << gLL_maxs << std::endl;
+			std::cout << "gUU range: " << std::endl;
+			std::cout << " mins " << gUU_mins << std::endl;
+			std::cout << " maxs " << gUU_maxs << std::endl;
+			std::cout << "GammaULL range: " << std::endl;
+			std::cout << " mins " << GammaULL_mins << std::endl;
+			std::cout << " maxs " << GammaULL_maxs << std::endl;
+			std::cout << "EFE range: " << std::endl;
+			std::cout << " mins " << EFE_mins << std::endl;
+			std::cout << " maxs " << EFE_maxs << std::endl;
+	
+#endif
+
+			
 			std::cout << "jfnk iter=" << jfnk.getIter() 
-				<< " alpha=" << std::setprecision(49) << jfnk.getAlpha() << std::setprecision(16)
+				<< " alpha=" << std::setprecision(49) << jfnk.getAlpha() << std::setprecision(6)
 				<< " residual=" << std::setprecision(49) << jfnk.getResidual() << std::setprecision(6) 
 				<< std::endl;
 			
 			jfnkFile << jfnk.getIter() 
 				<< "\t" << std::setprecision(16) << jfnk.getResidual() << std::setprecision(6)
-				<< "\t" << jfnk.getAlpha()
+				<< "\t" << std::setprecision(49) << jfnk.getAlpha() << std::setprecision(6)
 				<< std::endl;
 			gmresFile << std::endl;
 			
@@ -1729,16 +1660,22 @@ std::for_each(range.begin(), range.end(), [&](const Vector<int, subDim>& index) 
 			}
 			lastResidual = gmres->getResidual();
 			
+			if (!std::isfinite(gmres->getResidual())) {
+				std::cout << "gmres got a non-finite residual -- aborting gmres" << std::endl;
+				return true;
+			}
+			
 			//the residual is staying constant ... at 16 even, for a 4*4*4 grid ...
 			std::cout << "gmres"
 				<< " iter=" << gmres->getIter() 
-				<< " residual=" << gmres->getResidual() 
+				<< " residual=" << std::setprecision(49) << gmres->getResidual() << std::setprecision(6)
 				<< std::endl;
 			
 			gmresFile << jfnk.getIter()
 				<< "\t" << gmres->getIter()
 				<< "\t" << std::setprecision(16) << gmres->getResidual() << std::setprecision(6)
 				<< std::endl;
+
 			
 			return false;
 		};
@@ -1839,7 +1776,6 @@ struct EMUniformFieldBody : public Body {
 			real dist = 0.1;				//m
 			real E = volts / dist;			//V / m
 			E = E * sqrt(ke * G) / (c * c);	//m^-1
-E = 1;
 
 			stressEnergyPrims.E(0) = E;
 			stressEnergyPrims.E(1) = 0;
@@ -2252,7 +2188,9 @@ std::cout << "creating body " << bodyName << std::endl;
 		ALLOCATE_GRID(gLLs);
 		ALLOCATE_GRID(gUUs);
 		ALLOCATE_GRID(dt_gLLs);
+		ALLOCATE_GRID(d2t_gLLs);
 		//ALLOCATE_GRID(dt_gUUs);
+		ALLOCATE_GRID(dgLLLs);
 		//ALLOCATE_GRID(GammaLLLs);
 		ALLOCATE_GRID(GammaULLs);
 #undef ALLOCATE_GRID

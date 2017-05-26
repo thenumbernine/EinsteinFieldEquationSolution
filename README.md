@@ -55,7 +55,7 @@ Note that Kerr without rotation exhibits less gravitational acceleration than Ke
 
 ---
 
-![alt text](images/kerr fast rotation vs. kerr rotation.png)
+![alt text](images/kerr%20fast%20rotation%20vs.%20kerr%20rotation.png)
 
 Kerr metric increase in acceleration due to faster rotation.
 

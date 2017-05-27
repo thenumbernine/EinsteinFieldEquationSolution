@@ -172,57 +172,88 @@ gnuplot{
 }
 
 -- constant density vs PREM
-local premdata = file['prem.txt']:trim():split'\n':filter(function(l)
-	return l:sub(1,1) ~= '#'
-end):map(function(l)
-	return l:split'%s+':map(tonumber:o(I))
-end)
--- reverse
-premdata = premdata:map(function(_,i)
-	return premdata[#premdata-i+1]
-end)
-local prem = function(i) return premdata[i] end
+
+local function loadtable(fn)
+	return file[fn]:trim():split'\n':filter(function(l)
+		return l:sub(1,1) ~= '#'
+	end):map(function(l)
+		return l:split'%s+':map(tonumber:o(I))
+	end)
+end
+
 -- convert to meters
-local prem_r = premdata:map(function(row) return row[2] * km_in_m end)	-- km -> m
-local prem_rho = premdata:map(function(row) return row[5] * g_in_kg * kg_in_m / cm_in_m^3 end)		-- g/cm^3 -> m^-2
-local prem_P = premdata:map(function(row) return row[8] * 1e+9 * Pa_in_m end)	-- GPa -> m^-2
+-- load PREM data
+local earthdata = loadtable'prem.txt':map(function(row)
+	return {
+		r = row[2] * km_in_m,	-- km -> m
+		rho = row[5] * g_in_kg * kg_in_m / cm_in_m^3,	-- g/cm^3 -> m^-2
+		P = row[8] * 1e+9 * Pa_in_m,	-- GPa -> m^-2
+	}
+end)
 
--- now let's try to integrate prem_rho through the sphere ...
-local function integral(f, x1, x2)
-	local n = 2000 * math.ceil(x2 - x1) / 6e+6
+local premsize = #earthdata
+
+-- add in U.S. Standard Atmosphere data
+earthdata:append(loadtable'ussa.txt':map(function(row)
+	local P = row[3]	-- Pa = N/m^2 = J/m^3
+	local T = row[5]	-- K
+	local Rspec = 287.058	-- J / (kg K) ... for dry air (https://en.wikipedia.org/wiki/Gas_constant#Specific_gas_constant)
+	return {
+		r = row[1] + R,	-- alt -> radial coordinate, in m
+		P = P * Pa_in_m,	-- Pa -> m
+		-- P = rho Rspec T
+		rho = P / (Rspec * T) * kg_in_m,	-- kg/m^3 -> 1/m^2
+	}
+end))
+
+-- add some more precision to the last radial coordinate
+assert(earthdata[premsize].r == 6371e+3) earthdata[premsize].r = R	
+-- replace the P=0's with z=0 atmosphere pressure
+assert(earthdata[premsize-2].P == 0) earthdata[premsize-2].P = earthdata[premsize+1].P
+assert(earthdata[premsize-1].P == 0) earthdata[premsize-1].P = earthdata[premsize+1].P
+assert(earthdata[premsize].P == 0) earthdata[premsize].P = earthdata[premsize+1].P
+
+print(earthdata:map(function(l) return tolua(l) end):concat'\n')
+
+-- integrate piecewise linear radial function
+m = function(r) 
 	local sum = 0
-	local h = (x2 - x1) / n
-	for i=0,n do
-		local x = i/n * (x2 - x1) + x1
-		sum = sum + f(x) * (
-			(i == 0 or i == n) and 1
-			or ((i%2==1) and 4 or 2)
-		)
-	end
-	return sum * h / 3
-end
-local function rho(r) 
-	for i=1,#premdata-1 do
-		if prem_r[i+1] > r then
-			local f = (r - prem_r[i]) / (prem_r[i+1] - prem_r[i])
-			return (1-f) * prem_rho[i] + f * prem_rho[i+1]
+	local done
+	for i=1,#earthdata-1 do
+		local r1 = earthdata[i].r
+		local r2 = earthdata[i+1].r
+		local rho1 = earthdata[i].rho
+		local rho2 = earthdata[i+1].rho
+		if r < r2 then
+			local f = (r - r1) / (r2 - r1)
+			rho2 = (1-f) * rho1 + f * rho2 
+			r2 = r
+			done = true
 		end
+		if r2 > r1 then
+			--shell = 4 * pi * int( (rho1 + (rho2-rho1) * (r-r1)/(r2-r1)) * r^2, r, r1, r2)
+			--shell = 4 * pi * int( ( (rho1*r2 - rho2*r1) * r^2 + (rho2 - rho1) * r^3 )/(r2-r1), r, r1, r2)
+			local shell = 4 * math.pi * (
+				(rho1 * r2 - rho2 * r1)/3 * (r2^3 - r1^3)
+				+ (rho2 - rho1)/4 * (r2^4 - r1^4)
+			) / (r2-r1)
+			sum = sum + shell
+		end
+		if done then break end
 	end
-	return 0
+	return sum 
 end
-
-m = function(R) return integral(function(r) return 4 * math.pi * rho(r) * r^2 end, 0, R) end
 local epsilon = 1e-6
 dm_dr = function(R) return (m(R+epsilon) - m(R-epsilon)) / (2 * epsilon) end
 local x = (I-.5)/n * R*2
 gnuplot{
-	output = 'images/prem mass.png',
+	output = 'images/earth profile mass.png',
 	style = 'data lines',
 	data = data{x, m:o(x)},
 	{using='1:2', title='m(r)'},
 }
 gnuplot{
-	output = 'images/prem d_dr mass.png',
+	output = 'images/earth profile d_dr mass.png',
 	style = 'data lines',
 	data = data{x, dm_dr:o(x)},
 	{using='1:2', title='dm/dr'},
@@ -231,7 +262,7 @@ gnuplot{
 inc()
 local x = (I-.5)/n * R*10
 gnuplot{
-	output = 'images/prem gravity models.png',
+	output = 'images/earth profile gravity models.png',
 	log = 'y',
 	style = 'data lines',
 	ylabel = 'm/s^2',
@@ -248,7 +279,7 @@ gnuplot{
 --  show differences in gravity 
 local x = (I-.5)/n * R*2
 gnuplot{
-	output = 'images/prem gravity differences.png',
+	output = 'images/earth profile gravity differences.png',
 	style = 'data lines',
 	ylabel = 'm/s^2',
 	data = data{x,

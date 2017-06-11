@@ -37,7 +37,7 @@ ostream& operator<<(ostream& o, __float128 f) {
 #include <chrono>
 #include <iomanip>
 
-//#define CONVERGE_ALPHA_ONLY
+#define CONVERGE_ALPHA_ONLY
 //#define PRINTTIME
 #define PRINT_RANGES
 
@@ -2105,9 +2105,20 @@ int main(int argc, char** argv) {
 	if (!lua["solver"].isNil()) lua["solver"] >> solverName;	
 	std::cout << "solver=\"" << solverName << "\"" << std::endl;
 
-	int size = 16;
-	if (!lua["size"].isNil()) lua["size"] >> size;
-	std::cout << "size=" << size << std::endl;
+	sizev = Vector<int, subDim>(16, 16, 16);
+	if (!lua["size"].isNil()) {
+		if (lua["size"].isNumber()) {
+			for (int i = 0; i < subDim; ++i) {
+				lua["size"] >> sizev(i);
+			}
+		} else if (lua["size"].isTable()) {
+			for (int i = 0; i < subDim; ++i) {
+				if (!lua["size"][i+1].isNumber()) throw Common::Exception() << "size[" << (i+1) << "] is not a number";
+				lua["size"][i+1] >> sizev(i);
+			}
+		}
+	}
+	std::cout << "size=" << sizev << std::endl;
 
 	real bodyRadii = 2;
 	if (!lua["bodyRadii"].isNil()) {
@@ -2168,7 +2179,6 @@ std::cout << "creating body " << bodyName << std::endl;
 
 	xmin = Vector<real, subDim>(-bodyRadii*body->radius, -bodyRadii*body->radius, -bodyRadii*body->radius),
 	xmax = Vector<real, subDim>(bodyRadii*body->radius, bodyRadii*body->radius, bodyRadii*body->radius);
-	sizev = Vector<int, subDim>(size, size, size);
 	gridVolume = sizev.volume();
 	dx = (xmax - xmin) / sizev;
 

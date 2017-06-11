@@ -105,7 +105,7 @@ gnuplot{
 
 --  set radius and density to earth parameters:
 R = 6.37101e+6						--  matter radius, in m
-mass = 5.9736e+24 * G / c / c		--  total mass within radius, in m
+mass = 5.9736e+24 * kg_in_ml		--  total mass within radius, in m
 density = mass / sphereVolume(R)	--  average density, in m^-2
 m = function(x) return density * sphereVolume(math.min(R,x)) end			--  matter within radius, in m
 dm_dr = function(x) return R < x and 0 or (density * sphereSurface(x)) end	--  derivative of schwarzschild radius function wrt radius

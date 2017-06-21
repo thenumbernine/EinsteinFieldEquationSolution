@@ -105,8 +105,10 @@ gnuplot{
 
 --  set radius and density to earth parameters:
 R = 6.37101e+6						--  matter radius, in m
-mass = 5.9736e+24 * kg_in_ml		--  total mass within radius, in m
+mass = 5.9736e+24 * kg_in_m			--  total mass within radius, in m
 density = mass / sphereVolume(R)	--  average density, in m^-2
+print('density',density,'1/m^2')
+print('density',density/kg_in_m,'kg/m^3')
 m = function(x) return density * sphereVolume(math.min(R,x)) end			--  matter within radius, in m
 dm_dr = function(x) return R < x and 0 or (density * sphereSurface(x)) end	--  derivative of schwarzschild radius function wrt radius
 inc()
@@ -213,7 +215,7 @@ assert(earthdata[premsize-2].P == 0) earthdata[premsize-2].P = earthdata[premsiz
 assert(earthdata[premsize-1].P == 0) earthdata[premsize-1].P = earthdata[premsize+1].P
 assert(earthdata[premsize].P == 0) earthdata[premsize].P = earthdata[premsize+1].P
 
-print(earthdata:map(function(l) return tolua(l) end):concat'\n')
+--print(earthdata:map(function(l) return tolua(l) end):concat'\n')
 
 -- integrate piecewise linear radial function
 m = function(r) 

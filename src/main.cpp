@@ -1741,7 +1741,7 @@ struct SphericalBody : public Body {
 		Tensor::RangeObj<subDim> range(Tensor::Vector<int,subDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](const Tensor::Vector<int, subDim>& index) {
 			StressEnergyPrims &stressEnergyPrims = stressEnergyPrimGrid(index);
-			real r = Tensor::Vector<real, subDim>::length(xs(index));
+			real r = xs(index).length();
 			stressEnergyPrims.rho = r < radius ? density : 0;	// average density of Earth in m^-2
 			stressEnergyPrims.eInt = 0;	//internal energy / temperature of the Earth?
 			stressEnergyPrims.P = 0;	//pressure inside the Earth?
@@ -1888,7 +1888,7 @@ struct StellarSchwarzschildInitCond : public SphericalBodyInitCond {
 		parallel.foreach(range.begin(), range.end(), [&](const Tensor::Vector<int, subDim>& index) {
 			MetricPrims& metricPrims = metricPrimGrid(index);
 			const Tensor::Vector<real, subDim>& xi = xs(index);
-			real r = Tensor::Vector<real, subDim>::length(xi);
+			real r = xi.length();
 			real matterRadius = std::min<real>(r, radius);
 			real volumeOfMatterRadius = 4./3.*M_PI*matterRadius*matterRadius*matterRadius;
 			real m = density * volumeOfMatterRadius;	// m^3		
@@ -2348,7 +2348,7 @@ std::cout << "creating body " << bodyName << std::endl;
 		Tensor::RangeObj<subDim> range(Tensor::Vector<int,subDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](const Tensor::Vector<int, subDim>& index) {
 			Tensor::Vector<real, subDim> xi = xs(index);
-			real r = Tensor::Vector<real, subDim>::length(xi);
+			real r = xi.length();
 			//numerical computational...		
 			TensorUSL &GammaULL = GammaULLs(index);
 //the analytical calculations on these are identical, provided Gamma^i_tt is the schwarzschild metric connection
@@ -2378,7 +2378,7 @@ std::cout << "creating body " << bodyName << std::endl;
 			Tensor::RangeObj<subDim> range(Tensor::Vector<int,subDim>(), sizev);
 			parallel.foreach(range.begin(), range.end(), [&](const Tensor::Vector<int, subDim>& index) {
 				Tensor::Vector<real, subDim> xi = xs(index);
-				real r = Tensor::Vector<real, subDim>::length(xi);
+				real r = xi.length();
 				//substitute the schwarzschild R for 2 m(r)
 				real matterRadius = std::min<real>(r, sphericalBody->radius);
 				real volumeOfMatterRadius = 4./3.*M_PI*matterRadius*matterRadius*matterRadius;

@@ -322,10 +322,10 @@ int main() {
 	cols.push_back(Col("B^z", [&](Tensor::Vector<int,gridDim> index)->real{ return B(index)(2); }));
 	
 	cols.push_back(Col("|E|", [&](Tensor::Vector<int,gridDim> index)->real{
-		return Tensor::Vector<real,gridDim>::length(E(index));
+		return E(index).length();
 	}));
 	cols.push_back(Col("|B|", [&](Tensor::Vector<int,gridDim> index)->real{
-		return Tensor::Vector<real,gridDim>::length(B(index));
+		return B(index).length();
 	}));
 	cols.push_back(Col("div_E", [&](Tensor::Vector<int,gridDim> index)->real{
 		real div = 0.;

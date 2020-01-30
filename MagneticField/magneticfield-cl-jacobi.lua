@@ -24,7 +24,7 @@ for i=0,env.base.volume-1 do
 	end
 end
 
-local vec3d = require 'ffi.vec.vec3d'
+local vec3d = require 'vec-ffi.vec3d'
 local xmin = vec3d(-1, -1, -1)
 local xmax = vec3d(1, 1, 1)
 local dx = (xmax - xmin) / vec3d(env.base.size:unpack())

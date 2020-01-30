@@ -2,7 +2,7 @@
 
 local ffi = require 'ffi'
 local template = require 'template'
-local vec3d = require 'ffi.vec.vec3d'
+local vec3d = require 'vec-ffi.vec3d'
 
 local c = 299792458
 local G = 6.67408e-11

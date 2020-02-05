@@ -9,7 +9,7 @@ local gl = require 'gl'
 local sdl = require 'ffi.sdl'
 local ig = require 'ffi.imgui'
 local ImGuiApp = require 'imguiapp'
-local Mouse = require 'gui.mouse'
+local Mouse = require 'glapp.mouse'
 local quat = require 'vec.quat'
 local vec3 = require 'vec.vec3'
 local vec4 = require 'vec.vec4'
@@ -272,16 +272,16 @@ function App:update()
 	if mouse.leftDragging then
 		if leftShiftDown or rightShiftDown then
 			if rotateClip[0] == 0 then
-				viewDist = viewDist * math.exp(10 * mouse.deltaPos[2])
+				viewDist = viewDist * math.exp(10 * mouse.deltaPos.y)
 			else
 				local clipPlane = clipInfos[rotateClip[0]].plane
-				clipPlane[4] = clipPlane[4] - mouse.deltaPos[2]
+				clipPlane[4] = clipPlane[4] - mouse.deltaPos.y
 			end
 		else
 			local magn = mouse.deltaPos:length() * 1000
 			if magn > 0 then
 				local normDelta = mouse.deltaPos / magn
-				local r = quat():fromAngleAxis(-normDelta[2], normDelta[1], 0, -magn)
+				local r = quat():fromAngleAxis(-normDelta.y, normDelta.x, 0, -magn)
 				if rotateClip[0] == 0 then
 					viewAngle = (viewAngle * r):normalize()
 				else

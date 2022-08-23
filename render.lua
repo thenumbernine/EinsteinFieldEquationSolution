@@ -7,7 +7,7 @@ local bit = require 'bit'
 local ffi = require 'ffi'
 local gl = require 'gl'
 local sdl = require 'ffi.sdl'
-local ig = require 'ffi.imgui'
+local ig = require 'imgui'
 local ImGuiApp = require 'imguiapp'
 local Mouse = require 'glapp.mouse'
 local quat = require 'vec.quat'
@@ -38,12 +38,11 @@ local hsvTex
 local volumeShader
 
 -- which column to render?
-local col = ffi.new('int[1]', tonumber(col) or 4)
+local col = tonumber(col) or 4
 local colmax	-- max # of columns
 local colnames
 
-local clipEnabled = ffi.new('bool[1]', true)
-local rotateClip = ffi.new('int[1]', 0)
+local rotateClip = 0
 
 local function makeDefaultPlane(i)
 	local plane = vec4(0,0,0,0)
@@ -53,16 +52,17 @@ end
 
 local clipInfos = range(4):map(function(i)
 	return {
-		enabled = ffi.new('bool[1]', i==3),
+		enabled = i==3,
 		plane = makeDefaultPlane(i),
 	}
 end)
 
-local alpha = ffi.new('float[1]', 1.5e-1)
-local alphaGamma = ffi.new('float[1]', 1)
-local showGradTrace = ffi.new('bool[1]', false)
-local showCurlTrace = ffi.new('bool[1]', false)
-local flipGradient = ffi.new('bool[1]', false)
+-- _G for imgui table access
+alpha = 1.5e-1
+alphaGamma = 1
+showGradTrace = false
+showCurlTrace = false
+flipGradient = false
 
 local App = class(ImGuiApp)
 
@@ -258,9 +258,9 @@ function App:event(event, eventPtr)
 		elseif event.key.keysym.sym == sdl.SDLK_RSHIFT then
 			rightShiftDown = event.type == sdl.SDL_KEYDOWN
 		elseif event.key.keysym.sym == sdl.SDLK_UP and event.type == sdl.SDL_KEYUP then
-			col[0] = math.max(4, col[0] - 1)
+			col = math.max(4, col - 1)
 		elseif event.key.keysym.sym == sdl.SDLK_DOWN and event.type == sdl.SDL_KEYDOWN then
-			col[0] = math.min(colmax, col[0] + 1)
+			col = math.min(colmax, col + 1)
 		end
 	end
 end
@@ -271,10 +271,10 @@ function App:update()
 	end
 	if mouse.leftDragging then
 		if leftShiftDown or rightShiftDown then
-			if rotateClip[0] == 0 then
+			if rotateClip == 0 then
 				viewDist = viewDist * math.exp(10 * mouse.deltaPos.y)
 			else
-				local clipPlane = clipInfos[rotateClip[0]].plane
+				local clipPlane = clipInfos[rotateClip].plane
 				clipPlane[4] = clipPlane[4] - mouse.deltaPos.y
 			end
 		else
@@ -282,10 +282,10 @@ function App:update()
 			if magn > 0 then
 				local normDelta = mouse.deltaPos / magn
 				local r = quat():fromAngleAxis(-normDelta.y, normDelta.x, 0, -magn)
-				if rotateClip[0] == 0 then
+				if rotateClip == 0 then
 					viewAngle = (viewAngle * r):normalize()
 				else
-					local clipPlane = clipInfos[rotateClip[0]].plane
+					local clipPlane = clipInfos[rotateClip].plane
 					local clipNormal = (viewAngle * r * viewAngle:conjugate()):conjugate():rotate(vec3(clipPlane:unpack()))
 					for i=1,3 do
 						clipPlane[i] = clipNormal[i]
@@ -318,16 +318,16 @@ function App:update()
 
 	gl.glTranslatef(-.5, -.5, -.5)
 
-	local tex = texForCol[col[0]]
+	local tex = texForCol[col]
 
 	volumeShader:use()
 	tex:bind(0)
 	hsvTex:bind(1)
-	gl.glUniform1f(volumeShader.uniforms.alpha.loc, alpha[0])
-	gl.glUniform1f(volumeShader.uniforms.alphaGamma.loc, alphaGamma[0])
+	gl.glUniform1f(volumeShader.uniforms.alpha.loc, alpha)
+	gl.glUniform1f(volumeShader.uniforms.alphaGamma.loc, alphaGamma)
 	gl.glUniform1iv(volumeShader.uniforms['clipEnabled[0]'].loc, 4, 
-		ffi.new('int[4]', clipInfos:map(function(info) return info.enabled[0] end)))
-	gl.glUniform1i(volumeShader.uniforms.flipGradient.loc, flipGradient[0]) 
+		ffi.new('int[4]', clipInfos:map(function(info) return info.enabled end)))
+	gl.glUniform1i(volumeShader.uniforms.flipGradient.loc, flipGradient) 
 
 	gl.glEnable(gl.GL_TEXTURE_GEN_S)
 	gl.glEnable(gl.GL_TEXTURE_GEN_T)
@@ -392,11 +392,11 @@ function App:update()
 	tex:unbind(0)
 	volumeShader:useNone()
 
-	if showGradTrace[0] or showCurlTrace[0] then
+	if showGradTrace or showCurlTrace then
 		for i,clipInfo in ipairs(clipInfos) do
 -- intel/ubuntu was having trouble when the clip plane included the viewport
 -- so I moved the clipping code to the shader
-			if clipInfo.enabled[0] then 
+			if clipInfo.enabled then 
 				gl.glEnable(gl.GL_CLIP_PLANE0+i-1)
 			end
 		end
@@ -405,14 +405,14 @@ function App:update()
 		gl.glDisable(gl.GL_DEPTH_TEST)
 
 		self.gradLists = self.gradLists or {}
-		self.gradLists[col[0]] = self.gradLists[col[0]] or {}
+		self.gradLists[col] = self.gradLists[col] or {}
 		
 		self.curlLists = self.curlLists or {}
-		self.curlLists[col[0]] = self.curlLists[col[0]] or {}
+		self.curlLists[col] = self.curlLists[col] or {}
 		
 		for curl=0,1 do
-			if (curl==0 and showGradTrace[0]) or (curl==1 and showCurlTrace[0]) then
-				glcall(curl==0 and self.gradLists[col[0]] or self.curlLists[col[0]], function()
+			if (curl==0 and showGradTrace) or (curl==1 and showCurlTrace) then
+				glcall(curl==0 and self.gradLists[col] or self.curlLists[col], function()
 					-- TODO
 					-- 1) space out seeds
 					-- 2) integrate rk4 or something the lines
@@ -443,15 +443,15 @@ function App:update()
 											local indexm = 1 + i[1] + (self.max[1] + 1) * (i[2] + (self.max[2] + 1) * i[3])
 											assert(indexm >= 1 and indexm <= #self.pts, "failed for i="..i.." x="..x)
 											local dxm = vec3(
-												self.pts[indexm + 1][col[0]] - self.pts[indexm - 1][col[0]],
-												self.pts[indexm + self.max[1] + 1][col[0]] - self.pts[indexm - self.max[1] - 1][col[0]],
-												self.pts[indexm+(self.max[1]+1)*(self.max[2]+1)][col[0]]-self.pts[indexm-(self.max[1]+1)*(self.max[2]+1)][col[0]])
+												self.pts[indexm + 1][col] - self.pts[indexm - 1][col],
+												self.pts[indexm + self.max[1] + 1][col] - self.pts[indexm - self.max[1] - 1][col],
+												self.pts[indexm+(self.max[1]+1)*(self.max[2]+1)][col]-self.pts[indexm-(self.max[1]+1)*(self.max[2]+1)][col])
 											local indexp = 1 + i[1]+1 + (self.max[1] + 1) * (i[2]+1 + (self.max[2] + 1) * (i[3]+1))
 											assert(indexp >= 1 and indexp <= #self.pts, "failed for i="..i.." x="..x)
 											local dxp = vec3(
-												self.pts[indexp + 1][col[0]] - self.pts[indexp - 1][col[0]],
-												self.pts[indexp + self.max[1] + 1][col[0]] - self.pts[indexp - self.max[1] - 1][col[0]],
-												self.pts[indexp+(self.max[1]+1)*(self.max[2]+1)][col[0]]-self.pts[indexp-(self.max[1]+1)*(self.max[2]+1)][col[0]])
+												self.pts[indexp + 1][col] - self.pts[indexp - 1][col],
+												self.pts[indexp + self.max[1] + 1][col] - self.pts[indexp - self.max[1] - 1][col],
+												self.pts[indexp+(self.max[1]+1)*(self.max[2]+1)][col]-self.pts[indexp-(self.max[1]+1)*(self.max[2]+1)][col])
 									
 											-- one vector field is along the gradient ... the B field ...
 											-- the E field goes around ... normal to the plane of curvature of the B field? Frenet frame
@@ -537,17 +537,17 @@ function App:update()
 end
 
 function App:updateGUI()
-	col[0] = col[0] - 4
-	ig.igCombo('column', col, colnames and colnames:sub(4) or range(4,colmax))
-	col[0] = col[0] + 4
-	ig.igText(('%.3e to %.3e'):format(self.min[col[0]], self.max[col[0]]))
+	col = col - 4
+	ig.luatableCombo('column', _G, 'col', colnames and colnames:sub(4) or range(4,colmax))
+	col = col + 4
+	ig.igText(('%.3e to %.3e'):format(self.min[col], self.max[col]))
 	
 	local gradImageSize = ig.ImVec2(128, 32)
 	ig.igImage(
 		ffi.cast('void*',ffi.cast('intptr_t',hsvTex.id)),
 		gradImageSize,
-		ig.ImVec2(flipGradient[0] and 1 or 0,0),
-		ig.ImVec2(flipGradient[0] and 0 or 1,1))
+		ig.ImVec2(flipGradient and 1 or 0,0),
+		ig.ImVec2(flipGradient and 0 or 1,1))
 	local gradScreenPos = ig.igGetCursorScreenPos()
 	local mousePos = ig.igGetMousePos()
 	local cursorX = mousePos.x - gradScreenPos.x
@@ -557,27 +557,27 @@ function App:updateGUI()
 	then
 		local frac = cursorX / gradImageSize.x
 		ig.igBeginTooltip()
-		ig.igText(tostring( self.min[col[0]] * (1-frac) + self.max[col[0]] * frac ))
+		ig.igText(tostring( self.min[col] * (1-frac) + self.max[col] * frac ))
 		ig.igEndTooltip()
 	end
 	
-	ig.igSliderFloat('alpha', alpha, 0, 1, '%.3e', 10)
-	ig.igSliderFloat('gamma', alphaGamma, 0, 1000, '%.3e', 10)
-	ig.igCheckbox('flip gradient', flipGradient)
-	ig.igRadioButton("rotate camera", rotateClip, 0)
+	ig.luatableSliderFloat('alpha', _G, 'alpha', 0, 1, '%.3e', 10)
+	ig.luatableSliderFloat('gamma', _G, 'alphaGamma', 0, 1000, '%.3e', 10)
+	ig.luatableCheckbox('flip gradient', _G, 'flipGradient')
+	ig.luatableRadioButton("rotate camera", _G, 'rotateClip', 0)
 	for i,clipInfo in ipairs(clipInfos) do
 		ig.igPushIdStr('clip '..i)
-		ig.igCheckbox('clip', clipInfo.enabled)
+		ig.luatableCheckbox('clip', clipInfo, 'enabled')
 		ig.igSameLine()
-		ig.igRadioButton('rotate', rotateClip, i)
+		ig.luatableRadioButton('rotate', _G, 'rotateClip', i)
 		ig.igSameLine()
 		if ig.igButton('reset') then
 			clipInfo.plane = makeDefaultPlane(i)
 		end
 		ig.igPopId()
 	end
-	ig.igCheckbox('show gradient trace', showGradTrace)
-	ig.igCheckbox('show curl trace', showCurlTrace)
+	ig.luatableCheckbox('show gradient trace', _G, 'showGradTrace')
+	ig.luatableCheckbox('show curl trace', _G, 'showCurlTrace')
 end
 
 local app = App()

@@ -82,10 +82,10 @@ function App:initGL()
 				w = l:split'%s+'
 				if not colmax then
 					colmax = #w
-				else 
+				else
 					assert(#w == colmax)
 				end
-				local pt = w:map(function(x) 
+				local pt = w:map(function(x)
 					return tonumber(x) or error("expected a number but got "..x)
 				end)
 				self.pts:insert(pt)
@@ -100,7 +100,7 @@ function App:initGL()
 --[[
 local half = math.floor(self.max[1]/2)
 for i=half,self.max[1] do
-	local index = i + (self.max[1]+1) * (half + (self.max[2]+1) * half) + 1 
+	local index = i + (self.max[1]+1) * (half + (self.max[2]+1) * half) + 1
 	local pt = self.pts[index]
 	print(pt[1], pt[6])	-- alpha
 end
@@ -134,7 +134,7 @@ end
 			generateMipmap = true,
 		}
 		texForCol[col] = tex
-	end 
+	end
 
 	local hsvWidth = 256
 	hsvTex = GradientTex(hsvWidth,
@@ -166,7 +166,7 @@ end
 		false)
 	-- change to 2D so imgui can use it
 	local data = ffi.new('unsigned char[?]', hsvWidth*4)
-	gl.glGetTexImage(gl.GL_TEXTURE_1D, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, data)
+	hsvTex:toCPU(data)
 	hsvTex:unbind()
 	hsvTex:delete()
 	hsvTex = Tex2D{
@@ -239,7 +239,7 @@ void main() {
 end
 
 local leftShiftDown
-local rightShiftDown 
+local rightShiftDown
 local imguiCapturing
 function App:event(event, eventPtr)
 	App.super.event(self, event, eventPtr)
@@ -266,7 +266,7 @@ function App:event(event, eventPtr)
 end
 
 function App:update()
-	if not imguiCapturing then 
+	if not imguiCapturing then
 		mouse:update()
 	end
 	if mouse.leftDragging then
@@ -325,9 +325,9 @@ function App:update()
 	hsvTex:bind(1)
 	gl.glUniform1f(volumeShader.uniforms.alpha.loc, alpha)
 	gl.glUniform1f(volumeShader.uniforms.alphaGamma.loc, alphaGamma)
-	gl.glUniform1iv(volumeShader.uniforms['clipEnabled[0]'].loc, 4, 
+	gl.glUniform1iv(volumeShader.uniforms['clipEnabled[0]'].loc, 4,
 		ffi.new('int[4]', clipInfos:map(function(info) return info.enabled end)))
-	gl.glUniform1i(volumeShader.uniforms.flipGradient.loc, flipGradient) 
+	gl.glUniform1i(volumeShader.uniforms.flipGradient.loc, flipGradient)
 
 	gl.glEnable(gl.GL_TEXTURE_GEN_S)
 	gl.glEnable(gl.GL_TEXTURE_GEN_T)
@@ -346,7 +346,7 @@ function App:update()
 		gl.glPointSize(2)
 		gl.glBegin(gl.GL_POINTS)
 		for _,pt in ipairs(self.pts) do
-			gl.glVertex3d( 
+			gl.glVertex3d(
 				(pt[1] - self.min[1])/(self.max[1] - self.max[1]),
 				(pt[2] - self.min[2])/(self.max[2] - self.max[2]),
 				(pt[3] - self.min[3])/(self.max[3] - self.max[3]))
@@ -396,7 +396,7 @@ function App:update()
 		for i,clipInfo in ipairs(clipInfos) do
 -- intel/ubuntu was having trouble when the clip plane included the viewport
 -- so I moved the clipping code to the shader
-			if clipInfo.enabled then 
+			if clipInfo.enabled then
 				gl.glEnable(gl.GL_CLIP_PLANE0+i-1)
 			end
 		end

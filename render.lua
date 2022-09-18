@@ -566,7 +566,7 @@ function App:updateGUI()
 	ig.luatableCheckbox('flip gradient', _G, 'flipGradient')
 	ig.luatableRadioButton("rotate camera", _G, 'rotateClip', 0)
 	for i,clipInfo in ipairs(clipInfos) do
-		ig.igPushIdStr('clip '..i)
+		ig.igPushID_Str('clip '..i)
 		ig.luatableCheckbox('clip', clipInfo, 'enabled')
 		ig.igSameLine()
 		ig.luatableRadioButton('rotate', _G, 'rotateClip', i)

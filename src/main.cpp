@@ -244,7 +244,7 @@ real const ke = 8987551787.3682;	//kg m^3 / (s^2 C^2)
 
 //grid coordinate bounds
 real_Sub xmin, xmax;
-Tensor::intN<subDim> sizev;
+int_Sub sizev;
 int gridVolume;
 real_Sub dx;
 
@@ -259,7 +259,7 @@ Tensor::Grid<real_SymDim_Dim, subDim> dgLLLs;
 Tensor::Grid<real_Dim_SymDim, subDim> GammaULLs;
 
 template<typename CellType>
-void allocateGrid(Tensor::Grid<CellType, subDim>& grid, std::string name, Tensor::intN<subDim> sizev, size_t& totalSize) {
+void allocateGrid(Tensor::Grid<CellType, subDim>& grid, std::string name, int_Sub sizev, size_t& totalSize) {
 	size_t size = sizeof(CellType) * sizev.volume();
 	totalSize += size;
 	std::cout << name << ": " << size << " bytes, running total: " << totalSize << std::endl;
@@ -291,8 +291,8 @@ void calc_gLLs_and_gUUs(
 	Tensor::Grid<real_SymDim, subDim>& dt_gLLs	//first deriv
 ) {
 	//calculate gLL and gUU from metric primitives
-	Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
-	parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+	Tensor::RangeObj<subDim> range(int_Sub(), sizev);
+	parallel.foreach(range.begin(), range.end(), [&](int_Sub const & index) {
 		MetricPrims const &metricPrims = metricPrimGrid(index);
 		real alpha = metricPrims.alphaMinusOne + 1.;
 //debugging
@@ -440,8 +440,8 @@ void calc_GammaULLs(
 	Tensor::Grid<real_Dim_SymDim, subDim>& GammaULLs
 	//Tensor::Grid<real_Dim_SymDim, subDim>& GammaLLLs	//second deriv
 ) {
-	Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
-	parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+	Tensor::RangeObj<subDim> range(int_Sub(), sizev);
+	parallel.foreach(range.begin(), range.end(), [&](int_Sub const & index) {
 		//derivatives of the metric in spatial coordinates using finite difference
 		//the templated method (1) stores derivative first and (2) only stores spatial
 #warning "TODO get this working with ::v2"
@@ -450,7 +450,7 @@ void calc_GammaULLs(
 #else		
 		real_Sub_SymDim dgLLL3 = Tensor::partialDerivative<partialDerivativeOrder, real, subDim, real_SymDim>(
 			index, dx,
-			[&](Tensor::intN<subDim> index)
+			[&](int_Sub index)
 				-> real_SymDim
 			{
 				for (int i = 0; i < subDim; ++i) {
@@ -510,7 +510,7 @@ prereq: calc_gLLs_and_gUUs(), calc_GammaULLs()
 */
 real_SymDim calc_EinsteinLL(
 	//input
-	Tensor::intN<subDim> index,
+	int_Sub index,
 	Tensor::Grid<real_SymDim, subDim> const & gLLs,
 	Tensor::Grid<real_SymDim, subDim> const & gUUs,
 	Tensor::Grid<real_Dim_SymDim, subDim> const & GammaULLs
@@ -521,7 +521,7 @@ real_SymDim calc_EinsteinLL(
 #if 0	//calc first derivative of Gamma^a_bc's
 	//connection derivative
 	real_Sub_Dim_SymDim dGammaLULL3 = Tensor::partialDerivative<partialDerivativeOrder, real, subDim, real_Dim_SymDim>(
-		index, dx, [&](Tensor::intN<subDim> index) -> real_Dim_SymDim {
+		index, dx, [&](int_Sub index) -> real_Dim_SymDim {
 			for (int i = 0; i < subDim; ++i) {
 				index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
 			}
@@ -590,7 +590,7 @@ Gamma^a_bc,d = 1/2 (g^ae (g_eb,c + g_ec,b - g_bc,e)),d
 #else	
 	real_Sub_SymDim_Dim d2gLLLL3 = Tensor::partialDerivative<partialDerivativeOrder, real, subDim, real_SymDim_Dim>(
 		index, dx,
-		[&](Tensor::intN<subDim> index)
+		[&](int_Sub index)
 			-> real_SymDim_Dim
 		{
 			for (int i = 0; i < subDim; ++i) {
@@ -614,9 +614,9 @@ Gamma^a_bc,d = 1/2 (g^ae (g_eb,c + g_ec,b - g_bc,e)),d
 							//c or d is 0 = time?  then we need dt2_gLL ...
 							d2gLLLL(a,b,c,d) = d2t_gLL(a,b);
 						} else {
-							Tensor::intN<subDim> ixp = index;
+							int_Sub ixp = index;
 							ixp(c) = std::min(ixp(c) + 1, sizev(c)-1);
-							Tensor::intN<subDim> ixm = index;
+							int_Sub ixm = index;
 							ixm(c) = std::max(ixm(c) - 1, 0);
 							
 							real_SymDim_Dim const & dgLLL_ix = dgLLLs(index);
@@ -780,9 +780,9 @@ void calc_EinsteinLLs(
 	//output:
 	Tensor::Grid<real_SymDim, subDim> & EinsteinLLs
 ) {
-	Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
+	Tensor::RangeObj<subDim> range(int_Sub(), sizev);
 	assert(sizeof(real_SymDim) == sizeof(MetricPrims));	//10 reals for both
-	parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+	parallel.foreach(range.begin(), range.end(), [&](int_Sub const & index) {
 		real_SymDim & EinsteinLL = EinsteinLLs(index);
 		EinsteinLL = calc_EinsteinLL(index, gLLs, gUUs, GammaULLs);
 
@@ -1022,8 +1022,8 @@ void calc_EFE_constraint(
 	//output
 	Tensor::Grid<real_SymDim, subDim>& EFEGrid
 ) {
-	Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
-	parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+	Tensor::RangeObj<subDim> range(int_Sub(), sizev);
+	parallel.foreach(range.begin(), range.end(), [&](int_Sub const & index) {
 		
 		//for the JFNK solver that doesn't cache the EinsteinLL tensors
 		// no need to allocate for both an EinsteinLL grid and a EFEGrid
@@ -1104,8 +1104,8 @@ struct KrylovSolver : public EFESolver {
 		//output
 		Tensor::Grid<real_SymDim, subDim>& _8piTLLs
 	) {
-		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
-		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+		Tensor::RangeObj<subDim> range(int_Sub(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](int_Sub const & index) {
 			_8piTLLs(index) = calc_8piTLL(
 				metricPrimGrid(index), 
 				gLLs(index), 
@@ -1295,8 +1295,8 @@ struct GMRES : public Solver::GMRES<real> {
 			<< " real_rNormL2=" << real_rNormL2 
 			<< std::endl;
 		int e = 0;
-		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
-		std::for_each(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+		Tensor::RangeObj<subDim> range(int_Sub(), sizev);
+		std::for_each(range.begin(), range.end(), [&](int_Sub const & index) {
 			std::cout << "r[" << index << "] =";
 			for (int j = 0; j < 10; ++j, ++e) {
 				std::cout << " " << r[e];
@@ -1501,8 +1501,8 @@ std::cout << std::endl;
 //this is happening after the first gmres iteration, but I don't think it should ...
 std::cout << "got jfnk residual == 0" << std::endl;
 int e = 0;
-Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
-std::for_each(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+Tensor::RangeObj<subDim> range(int_Sub(), sizev);
+std::for_each(range.begin(), range.end(), [&](int_Sub const & index) {
 	std::cout << "index=" << index;
 	std::cout << " metricPrims=";
 	for (int j = 0; j < 10; ++j, ++e) {
@@ -1716,8 +1716,8 @@ struct SphericalBody : public Body {
 		Tensor::Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
 		Tensor::Grid<real_Sub, subDim> const & xs
 	) {
-		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
-		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+		Tensor::RangeObj<subDim> range(int_Sub(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](int_Sub const & index) {
 			StressEnergyPrims &stressEnergyPrims = stressEnergyPrimGrid(index);
 			real r = xs(index).length();
 			stressEnergyPrims.rho = r < radius ? density : 0;	// average density of Earth in m^-2
@@ -1742,8 +1742,8 @@ struct EMUniformFieldBody : public Body {
 		Tensor::Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
 		Tensor::Grid<real_Sub, subDim> const & xs
 	) {
-		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
-		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+		Tensor::RangeObj<subDim> range(int_Sub(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](int_Sub const & index) {
 			StressEnergyPrims &stressEnergyPrims = stressEnergyPrimGrid(index);
 
 			stressEnergyPrims.useEM = true; 
@@ -1773,8 +1773,8 @@ struct EMLineBody : public Body {
 		Tensor::Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
 		Tensor::Grid<real_Sub, subDim> const & xs
 	) {
-		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
-		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+		Tensor::RangeObj<subDim> range(int_Sub(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](int_Sub const & index) {
 			StressEnergyPrims &stressEnergyPrims = stressEnergyPrimGrid(index);
 			real_Sub const & xi = xs(index);
 			real x = xi(0);
@@ -1835,8 +1835,8 @@ struct FlatInitCond : public InitCond {
 		Tensor::Grid<MetricPrims, subDim>& metricPrimGrid,
 		Tensor::Grid<real_Sub, subDim> const & xs
 	) {
-		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
-		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+		Tensor::RangeObj<subDim> range(int_Sub(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](int_Sub const & index) {
 			MetricPrims& metricPrims = metricPrimGrid(index);
 			metricPrims.alphaMinusOne = 0;
 			for (int i = 0; i < subDim; ++i) {
@@ -1862,8 +1862,8 @@ struct StellarSchwarzschildInitCond : public SphericalBodyInitCond {
 		real radius = body->radius;
 		real density = body->density;
 		real mass = body->mass;
-		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
-		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+		Tensor::RangeObj<subDim> range(int_Sub(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](int_Sub const & index) {
 			MetricPrims& metricPrims = metricPrimGrid(index);
 			real_Sub const & xi = xs(index);
 			real r = xi.length();
@@ -1990,8 +1990,8 @@ struct StellarKerrNewmanInitCond : public SphericalBodyInitCond {
 		real radius = body->radius;
 		real mass = body->mass;
 		real density = body->density;
-		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
-		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+		Tensor::RangeObj<subDim> range(int_Sub(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](int_Sub const & index) {
 			MetricPrims& metricPrims = metricPrimGrid(index);
 			real_Sub const & xi = xs(index);
 			
@@ -2081,7 +2081,7 @@ int main(int argc, char** argv) {
 	if (!lua["solver"].isNil()) lua["solver"] >> solverName;	
 	std::cout << "solver=\"" << solverName << "\"" << std::endl;
 
-	sizev = Tensor::intN<subDim>(16, 16, 16);
+	sizev = int_Sub(16, 16, 16);
 	if (!lua["size"].isNil()) {
 		if (lua["size"].isNumber()) {
 			for (int i = 0; i < subDim; ++i) {
@@ -2191,8 +2191,8 @@ std::cout << "creating body " << bodyName << std::endl;
 
 	//specify coordinates
 	time("calculating grid", [&]{
-		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
-		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+		Tensor::RangeObj<subDim> range(int_Sub(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](int_Sub const & index) {
 			real_Sub& xi = xs(index);
 			for (int j = 0; j < subDim; ++j) {
 				xi(j) = (xmax(j) - xmin(j)) * ((real)index(j) + .5) / (real)sizev(j) + xmin(j);
@@ -2211,8 +2211,8 @@ std::cout << "creating body " << bodyName << std::endl;
 
 	//while we're here, set the 'useE' and 'useV' flags, to spare our calculations
 	time("determine what stress-energy variables to use", [&]() {
-		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
-		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+		Tensor::RangeObj<subDim> range(int_Sub(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](int_Sub const & index) {
 			StressEnergyPrims& stressEnergyPrims = stressEnergyPrimGrid(index);
 			
 			stressEnergyPrims.useV = false;
@@ -2330,8 +2330,8 @@ std::cout << "creating body " << bodyName << std::endl;
 
 	Tensor::Grid<real, subDim> numericalGravity(sizev);
 	time("calculating numerical gravitational force", [&]{
-		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
-		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+		Tensor::RangeObj<subDim> range(int_Sub(), sizev);
+		parallel.foreach(range.begin(), range.end(), [&](int_Sub const & index) {
 			real_Sub xi = xs(index);
 			real r = xi.length();
 			//numerical computational...		
@@ -2360,8 +2360,8 @@ std::cout << "creating body " << bodyName << std::endl;
 	std::shared_ptr<SphericalBody> sphericalBody = std::dynamic_pointer_cast<SphericalBody>(body);
 	if (sphericalBody) {
 		time("calculating analytical gravitational force", [&]{
-			Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
-			parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+			Tensor::RangeObj<subDim> range(int_Sub(), sizev);
+			parallel.foreach(range.begin(), range.end(), [&](int_Sub const & index) {
 				real_Sub xi = xs(index);
 				real r = xi.length();
 				//substitute the schwarzschild R for 2 m(r)
@@ -2385,17 +2385,17 @@ std::cout << "creating body " << bodyName << std::endl;
 	{
 		struct Col {
 			std::string name;
-			std::function<real(Tensor::intN<subDim>)> func;
+			std::function<real(int_Sub)> func;
 		};
 		std::vector<Col> cols = {
-			{"ix", [&](Tensor::intN<subDim> index)->real{ return index(0); }},
-			{"iy", [&](Tensor::intN<subDim> index)->real{ return index(1); }},
-			{"iz", [&](Tensor::intN<subDim> index)->real{ return index(2); }},
-			{"rho", [&](Tensor::intN<subDim> index)->real{ return stressEnergyPrimGrid(index).rho; }},
-			{"det_h", [&](Tensor::intN<subDim> index)->real{ return Tensor::determinant33<real, real_SymSub>(metricPrimGrid(index).hLL); }},
-			{"alpha-1", [&](Tensor::intN<subDim> index)->real{ return metricPrimGrid(index).alphaMinusOne; }},
+			{"ix", [&](int_Sub index)->real{ return index(0); }},
+			{"iy", [&](int_Sub index)->real{ return index(1); }},
+			{"iz", [&](int_Sub index)->real{ return index(2); }},
+			{"rho", [&](int_Sub index)->real{ return stressEnergyPrimGrid(index).rho; }},
+			{"det_h", [&](int_Sub index)->real{ return Tensor::determinant33<real, real_SymSub>(metricPrimGrid(index).hLL); }},
+			{"alpha-1", [&](int_Sub index)->real{ return metricPrimGrid(index).alphaMinusOne; }},
 #if 0	//within 1e-23			
-			{"ortho_error", [&](Tensor::intN<subDim> index)->real{
+			{"ortho_error", [&](int_Sub index)->real{
 				real_SymDim const & gLL = gLLs(index);
 				real_SymDim const & gUU = gUUs(index);
 				real err = 0;
@@ -2412,21 +2412,21 @@ std::cout << "creating body " << bodyName << std::endl;
 			}},
 #endif
 #if 1		// numerical gravity is double what analytical gravity is ... and flips to negative as it passes the planet surface ...
-			{"gravity", [&](Tensor::intN<subDim> index)->real{ return numericalGravity(index); }},
+			{"gravity", [&](int_Sub index)->real{ return numericalGravity(index); }},
 		};
 		if (sphericalBody) {
-			cols.push_back({"analyticalGravity", [&](Tensor::intN<subDim> index)->real{ return analyticalGravity(index); }});
+			cols.push_back({"analyticalGravity", [&](int_Sub index)->real{ return analyticalGravity(index); }});
 		}
 		std::vector<Col> moreCols = {
 #endif
-			{"EFE_tt(g/cm^3)", [&](Tensor::intN<subDim> index)->real{
+			{"EFE_tt(g/cm^3)", [&](int_Sub index)->real{
 				return EFEGrid(index)(0,0) / (8. * M_PI) * c * c / G / 1000.;	// g/cm^3 ... so in absense of any curvature, the constraint error will now match the density
 			}},
-			{"EFE_ti", [&](Tensor::intN<subDim> index)->real{ 
+			{"EFE_ti", [&](int_Sub index)->real{ 
 				real_SymDim &t = EFEGrid(index);
 				return sqrt( t(0,1)*t(0,1) + t(0,2)*t(0,2) + t(0,3)*t(0,3) ) * c;
 			}},
-			{"EFE_ij", [&](Tensor::intN<subDim> index) -> real {
+			{"EFE_ij", [&](int_Sub index) -> real {
 				real_SymDim &t = EFEGrid(index);
 				/* determinant
 				return t(1,1) * t(2,2) * t(3,3)
@@ -2446,7 +2446,7 @@ std::cout << "creating body " << bodyName << std::endl;
 				return sqrt(sum);
 			}},
 #if 1
-			{"G_ab", [&](Tensor::intN<subDim> index)->real{
+			{"G_ab", [&](int_Sub index)->real{
 				real_SymDim G = calc_EinsteinLL(index, gLLs, gUUs, GammaULLs);
 				real sum = 0;
 				for (int a = 0; a < dim; ++a) {
@@ -2478,7 +2478,7 @@ std::cout << "creating body " << bodyName << std::endl;
 			file << std::endl;
 			time("outputting", [&]{
 				//this is printing output, so don't do it in parallel		
-				Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
+				Tensor::RangeObj<subDim> range(int_Sub(), sizev);
 				for (Tensor::RangeObj<subDim>::iterator iter = range.begin(); iter != range.end(); ++iter) {
 					char const * tab = "";
 					for (std::vector<Col>::iterator p = cols.begin(); p != cols.end(); ++p) {
@@ -2495,11 +2495,11 @@ std::cout << "creating body " << bodyName << std::endl;
 
 #if 0
 	{
-		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
+		Tensor::RangeObj<subDim> range(int_Sub(), sizev);
 		
 		real EFE_tt_min = std::numeric_limits<real>::infinity();
 		real EFE_tt_max = -std::numeric_limits<real>::infinity();
-		std::for_each(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+		std::for_each(range.begin(), range.end(), [&](int_Sub const & index) {
 			real EFE_tt = EFEGrid(index)(0,0);
 			if (EFE_tt < EFE_tt_min) EFE_tt_min = EFE_tt;
 			if (EFE_tt > EFE_tt_max) EFE_tt_max = EFE_tt;
@@ -2508,7 +2508,7 @@ std::cout << "creating body " << bodyName << std::endl;
 
 		int bins = 256;
 		std::vector<real> EFE_tt_distr(bins);
-		std::for_each(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
+		std::for_each(range.begin(), range.end(), [&](int_Sub const & index) {
 			real EFE_tt = EFEGrid(index)(0,0);
 			int bin = (int)((EFE_tt - EFE_tt_min) / (EFE_tt_max - EFE_tt_min) * (real)bins);
 			if (bin == bins) --bin;

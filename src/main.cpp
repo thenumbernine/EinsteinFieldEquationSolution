@@ -31,7 +31,6 @@ ostream& operator<<(ostream& o, __float128 f) {
 #include "Tensor/Derivative.h"
 #include "Tensor/Grid.h"
 #include "Tensor/Tensor.h"
-#include "Tensor/vec.h"
 #include "Common/Exception.h"
 #include "Common/Macros.h"
 #include <functional>
@@ -69,16 +68,16 @@ static constexpr auto subDim = 3;	//spatial dim
 static constexpr auto dim = subDim+1;
 
 template<typename T>
-using vecDim = Tensor::v2::_vec<T,dim>;
+using vecDim = Tensor::_vec<T,dim>;
 
 template<typename T>
-using vecSubDim = Tensor::v2::_vec<T,subDim>;
+using vecSubDim = Tensor::_vec<T,subDim>;
 
 template<typename T>
-using symDim = Tensor::v2::_sym<T,dim>;
+using symDim = Tensor::_sym<T,dim>;
 
 template<typename T>
-using symSubDim = Tensor::v2::_sym<T,subDim>;
+using symSubDim = Tensor::_sym<T,subDim>;
 
 
 //subDim
@@ -95,7 +94,7 @@ using real_Dim_Dim = vecDim<vecDim<real>>;
 using real_Dim_SymDim = vecDim<symDim<real>>;
 using real_SymDim_Dim = symDim<vecDim<real>>;
 
-using real_Dim_Dim_Dim = vecDim<vecDim<vecDim<real>>>;	//Tensor::v2::_tensor<real, dim, dim, dim>;
+using real_Dim_Dim_Dim = vecDim<vecDim<vecDim<real>>>;	//Tensor::_tensor<real, dim, dim, dim>;
 /* 
 TODO generalize: 
 real_SymDim_Dim = _tensor<real, _realSym<dim>, _real<dim>>;
@@ -105,7 +104,7 @@ where each arg is a single-arg template that gets concatenated
 
 using real_Dim_SymDim_Dim = vecDim<symDim<vecDim<real>>>;
 using real_SymDim_SymDim = symDim<symDim<real>>;
-using real_Dim_Dim_Dim_Dim = vecDim<vecDim<vecDim<vecDim<real>>>>; //Tensor::v2::_tensor<real, dim, dim, dim, dim>;
+using real_Dim_Dim_Dim_Dim = vecDim<vecDim<vecDim<vecDim<real>>>>; //Tensor::_tensor<real, dim, dim, dim, dim>;
 
 //mixed subDim & dim
 using real_Sub_SymDim = vecSubDim<symDim<real>>;
@@ -137,22 +136,6 @@ struct gridFromPtr {
 		grid.v = {};	//don't deallocate
 	}
 };
-
-real determinant44(real_SymDim const & m) {
-	real sign = 1;
-	real sum = 0;
-	for (int a = 0; a < 4; ++a) {
-		real_Sub_Sub subm;
-		for (int i = 0; i < 3; ++i) {
-			for (int j = 0; j < 3; ++j) {
-				subm(i,j) = m(i+1, j + (j>=a));
-			}
-		}
-		sum += sign * m(0,a) * Tensor::v2::determinant(subm);
-		sign = -sign;
-	}
-	return sum;
-}
 
 //variables used to build the metric 
 //dim * (dim+1) / 2 vars
@@ -363,7 +346,7 @@ assert(alpha != 0);
 		}
 	
 		//gamma^ij
-		real_SymSub gammaUU = Tensor::v2::inverse(gammaLL);
+		real_SymSub gammaUU = Tensor::inverse(gammaLL);
 
 		//g^ab
 		real_SymDim & gUU = gUUs(index);
@@ -444,22 +427,16 @@ void calc_GammaULLs(
 	parallel.foreach(range.begin(), range.end(), [&](int_Sub const & index) {
 		//derivatives of the metric in spatial coordinates using finite difference
 		//the templated method (1) stores derivative first and (2) only stores spatial
-#warning "TODO get this working with ::v2"
-#if 1 
-		real_Sub_SymDim dgLLL3;
-#else		
 		real_Sub_SymDim dgLLL3 = Tensor::partialDerivative<partialDerivativeOrder, real, subDim, real_SymDim>(
 			index, dx,
-			[&](int_Sub index)
-				-> real_SymDim
-			{
+			[&](int_Sub index) -> real_SymDim {
 				for (int i = 0; i < subDim; ++i) {
 					index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
 				}
 				return gLLs(index);
 			}
 		);
-#endif		
+		
 		real_SymDim const & dt_gLL = dt_gLLs(index);
 		real_SymDim_Dim & dgLLL = dgLLLs(index);
 		for (int a = 0; a < dim; ++a) {
@@ -584,22 +561,15 @@ Gamma^a_bc,d = 1/2 (g^ae (g_eb,c + g_ec,b - g_bc,e)),d
 	}
 
 	//g_ab,ci
-#warning "TODO get this working with ::v2"
-#if 1
-	real_Sub_SymDim_Dim d2gLLLL3;
-#else	
 	real_Sub_SymDim_Dim d2gLLLL3 = Tensor::partialDerivative<partialDerivativeOrder, real, subDim, real_SymDim_Dim>(
 		index, dx,
-		[&](int_Sub index)
-			-> real_SymDim_Dim
-		{
+		[&](int_Sub index) -> real_SymDim_Dim {
 			for (int i = 0; i < subDim; ++i) {
 				index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
 			}
 			return dgLLLs(index);
 		}
 	);
-#endif
 
 	//g_ab,cd
 	real_SymDim_SymDim d2gLLLL;
@@ -851,7 +821,7 @@ real_SymDim calc_8piTLL(
 		
 		//should I be doing a full 4x4 determinant?
 		//if converging beta then yep
-		real sqrtDetG = sqrt(fabs(determinant44(gLL)));
+		real sqrtDetG = sqrt(fabs(Tensor::determinant(gLL)));
 	
 		//n_a = t_,a
 		real_Dim nL;
@@ -1927,7 +1897,7 @@ struct StellarSchwarzschildInitCond : public SphericalBodyInitCond {
 			//real omega = 1;	//angular velocity of the speed of light
 			real omega = c;	//I'm trying to find a difference ...
 			real t = 0;	//where the position should be.  t=0 means the body is moved by [L, 0], and its derivatives are along [0, L omega] 
-			Tensor::v2::_vec2<real> dt_xHat(L * omega * sin(omega * t), -L * omega * cos(omega * t));
+			Tensor::_vec2<real> dt_xHat(L * omega * sin(omega * t), -L * omega * cos(omega * t));
 			dt_metricPrims.alphaMinusOne = dr_alpha * (xi(0)/r * dt_xHat(0) + xi(1)/r * dt_xHat(1)) - 1.;
 			for (int i = 0; i < subDim; ++i) {
 				dt_metricPrims.betaU(i) = 0;
@@ -1968,7 +1938,7 @@ struct StellarSchwarzschildInitCond : public SphericalBodyInitCond {
 				real dm_dr = 0;
 				betaL(i) = -(2*m * (r - 2*m) + 2 * dm_dr * r * (2*m - r)) / (2 * r * r * r) * xi(i)/r;
 			}
-			real_SymSub gammaUU = Tensor::v2::inverse(metricPrims.hLL + delta3LL);
+			real_SymSub gammaUU = Tensor::inverse(metricPrims.hLL + delta3LL);
 			for (int i = 0; i < subDim; ++i) {
 				real sum = 0;
 				for (int j = 0; j < subDim; ++j) {
@@ -2392,7 +2362,7 @@ std::cout << "creating body " << bodyName << std::endl;
 			{"iy", [&](int_Sub index)->real{ return index(1); }},
 			{"iz", [&](int_Sub index)->real{ return index(2); }},
 			{"rho", [&](int_Sub index)->real{ return stressEnergyPrimGrid(index).rho; }},
-			{"det_h", [&](int_Sub index)->real{ return Tensor::determinant33<real, real_SymSub>(metricPrimGrid(index).hLL); }},
+			{"det_h", [&](int_Sub index)->real{ return Tensor::determinant(metricPrimGrid(index).hLL); }},
 			{"alpha-1", [&](int_Sub index)->real{ return metricPrimGrid(index).alphaMinusOne; }},
 #if 0	//within 1e-23			
 			{"ortho_error", [&](int_Sub index)->real{

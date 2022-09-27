@@ -1687,7 +1687,7 @@ struct Body {
 
 	virtual void initStressEnergyPrim(
 		Tensor::Grid<StressEnergyPrims, subDim> & stressEnergyPrimGrid,
-		Tensor::Grid<Tensor::Vector<real, subDim>, subDim> const & xs
+		Tensor::Grid<real_Sub, subDim> const & xs
 	) = 0;
 };
 
@@ -1696,7 +1696,7 @@ struct NullBody : public Body {
 
 	virtual void initStressEnergyPrim(
 		Tensor::Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
-		Tensor::Grid<Tensor::Vector<real, subDim>, subDim> const & xs
+		Tensor::Grid<real_Sub, subDim> const & xs
 	) { }
 };
 
@@ -1714,7 +1714,7 @@ struct SphericalBody : public Body {
 
 	virtual void initStressEnergyPrim(
 		Tensor::Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
-		Tensor::Grid<Tensor::Vector<real, subDim>, subDim> const & xs
+		Tensor::Grid<real_Sub, subDim> const & xs
 	) {
 		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
@@ -1740,7 +1740,7 @@ struct EMUniformFieldBody : public Body {
 	using Body::Body;
 	virtual void initStressEnergyPrim(
 		Tensor::Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
-		Tensor::Grid<Tensor::Vector<real, subDim>, subDim> const & xs
+		Tensor::Grid<real_Sub, subDim> const & xs
 	) {
 		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
@@ -1771,12 +1771,12 @@ struct EMLineBody : public Body {
 	//radius is the big radius of the torus
 	virtual void initStressEnergyPrim(
 		Tensor::Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
-		Tensor::Grid<Tensor::Vector<real, subDim>, subDim> const & xs
+		Tensor::Grid<real_Sub, subDim> const & xs
 	) {
 		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
 			StressEnergyPrims &stressEnergyPrims = stressEnergyPrimGrid(index);
-			Tensor::Vector<real, subDim> const & xi = xs(index);
+			real_Sub const & xi = xs(index);
 			real x = xi(0);
 			real y = xi(1);
 			real z = xi(2);
@@ -1820,7 +1820,7 @@ struct EMLineBody : public Body {
 struct InitCond {
 	virtual void initMetricPrims(
 		Tensor::Grid<MetricPrims, subDim>& metricPrimGrid,
-		Tensor::Grid<Tensor::Vector<real, subDim>, subDim> const & xs
+		Tensor::Grid<real_Sub, subDim> const & xs
 	) = 0;
 };
 
@@ -1833,7 +1833,7 @@ struct FlatInitCond : public InitCond {
 	//substitute the schwarzschild R for 2 m(r)
 	virtual void initMetricPrims(
 		Tensor::Grid<MetricPrims, subDim>& metricPrimGrid,
-		Tensor::Grid<Tensor::Vector<real, subDim>, subDim> const & xs
+		Tensor::Grid<real_Sub, subDim> const & xs
 	) {
 		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
@@ -1857,7 +1857,7 @@ struct StellarSchwarzschildInitCond : public SphericalBodyInitCond {
 	using SphericalBodyInitCond::SphericalBodyInitCond;
 	virtual void initMetricPrims(
 		Tensor::Grid<MetricPrims, subDim>& metricPrimGrid,
-		Tensor::Grid<Tensor::Vector<real, subDim>, subDim> const & xs
+		Tensor::Grid<real_Sub, subDim> const & xs
 	) {
 		real radius = body->radius;
 		real density = body->density;
@@ -1865,7 +1865,7 @@ struct StellarSchwarzschildInitCond : public SphericalBodyInitCond {
 		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
 			MetricPrims& metricPrims = metricPrimGrid(index);
-			Tensor::Vector<real, subDim> const & xi = xs(index);
+			real_Sub const & xi = xs(index);
 			real r = xi.length();
 			real matterRadius = std::min<real>(r, radius);
 			real volumeOfMatterRadius = 4./3.*M_PI*matterRadius*matterRadius*matterRadius;
@@ -1927,7 +1927,7 @@ struct StellarSchwarzschildInitCond : public SphericalBodyInitCond {
 			//real omega = 1;	//angular velocity of the speed of light
 			real omega = c;	//I'm trying to find a difference ...
 			real t = 0;	//where the position should be.  t=0 means the body is moved by [L, 0], and its derivatives are along [0, L omega] 
-			Tensor::Vector<real,2> dt_xHat(L * omega * sin(omega * t), -L * omega * cos(omega * t));
+			Tensor::v2::_vec2<real> dt_xHat(L * omega * sin(omega * t), -L * omega * cos(omega * t));
 			dt_metricPrims.alphaMinusOne = dr_alpha * (xi(0)/r * dt_xHat(0) + xi(1)/r * dt_xHat(1)) - 1.;
 			for (int i = 0; i < subDim; ++i) {
 				dt_metricPrims.betaU(i) = 0;
@@ -1985,7 +1985,7 @@ struct StellarKerrNewmanInitCond : public SphericalBodyInitCond {
 	using SphericalBodyInitCond::SphericalBodyInitCond;
 	virtual void initMetricPrims(
 		Tensor::Grid<MetricPrims, subDim>& metricPrimGrid,
-		Tensor::Grid<Tensor::Vector<real, subDim>, subDim> const & xs
+		Tensor::Grid<real_Sub, subDim> const & xs
 	) {
 		real radius = body->radius;
 		real mass = body->mass;
@@ -1993,7 +1993,7 @@ struct StellarKerrNewmanInitCond : public SphericalBodyInitCond {
 		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
 			MetricPrims& metricPrims = metricPrimGrid(index);
-			Tensor::Vector<real,subDim> const & xi = xs(index);
+			real_Sub const & xi = xs(index);
 			
 			real x = xi(0);
 			real y = xi(1);
@@ -2033,7 +2033,7 @@ struct StellarKerrNewmanInitCond : public SphericalBodyInitCond {
 			//metricPrims.alphaMinusOne = 1./sqrt(1. + 2*H) - 1.;
 			metricPrims.alphaMinusOne = sqrt(1. - 2*H/(1+2*H) ) - 1.;
 			
-			Tensor::Vector<real,subDim> l( (r*x + a*y)/(r*r + a*a), (r*y - a*x)/(r*r + a*a), z/r );
+			real_Sub l( (r*x + a*y)/(r*r + a*a), (r*y - a*x)/(r*r + a*a), z/r );
 			for (int i = 0; i < subDim; ++i) {
 				metricPrims.betaU(i) = 2. * H * l(i) / (1. + 2. * H);
 				for (int j = 0; j <= i; ++j) {
@@ -2165,7 +2165,7 @@ std::cout << "creating body " << bodyName << std::endl;
 	}
 #endif
 
-	Tensor::Grid<Tensor::Vector<real, subDim>, subDim> xs;
+	Tensor::Grid<real_Sub, subDim> xs;
 	Tensor::Grid<MetricPrims, subDim> metricPrimGrid;
 	Tensor::Grid<MetricPrims, subDim> dt_metricPrimGrid;	//first deriv
 	Tensor::Grid<StressEnergyPrims, subDim> stressEnergyPrimGrid;
@@ -2193,7 +2193,7 @@ std::cout << "creating body " << bodyName << std::endl;
 	time("calculating grid", [&]{
 		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
-			Tensor::Vector<real, subDim>& xi = xs(index);
+			real_Sub& xi = xs(index);
 			for (int j = 0; j < subDim; ++j) {
 				xi(j) = (xmax(j) - xmin(j)) * ((real)index(j) + .5) / (real)sizev(j) + xmin(j);
 			}
@@ -2332,7 +2332,7 @@ std::cout << "creating body " << bodyName << std::endl;
 	time("calculating numerical gravitational force", [&]{
 		Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
-			Tensor::Vector<real, subDim> xi = xs(index);
+			real_Sub xi = xs(index);
 			real r = xi.length();
 			//numerical computational...		
 			real_Dim_SymDim & GammaULL = GammaULLs(index);
@@ -2362,7 +2362,7 @@ std::cout << "creating body " << bodyName << std::endl;
 		time("calculating analytical gravitational force", [&]{
 			Tensor::RangeObj<subDim> range(Tensor::intN<subDim>(), sizev);
 			parallel.foreach(range.begin(), range.end(), [&](Tensor::intN<subDim> const & index) {
-				Tensor::Vector<real, subDim> xi = xs(index);
+				real_Sub xi = xs(index);
 				real r = xi.length();
 				//substitute the schwarzschild R for 2 m(r)
 				real matterRadius = std::min<real>(r, sphericalBody->radius);

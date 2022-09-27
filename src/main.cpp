@@ -57,38 +57,6 @@ void time(std::string const & name, std::function<void()> f) {
 	std::cout << "(" << diff.count() << "s)" << std::endl;
 }
 
-//opposite upper/lower of what is already in Tensor/Inverse.h
-namespace Tensor {
-
-template<typename Real_>
-struct InverseClass<Tensor<Real_, Symmetric<Upper<3>, Upper<3>>>> {
-	using Real = Real_;
-	using InputType = Tensor<Real, Upper<3>, Upper<3>>;
-	using OutputType = Tensor<Real, Lower<3>, Lower<3>>;
-	OutputType operator()(InputType const & a, Real const & det) const {
-		OutputType result;
-		//symmetric, so only do Lower triangular
-		result(0,0) = det22(a(1,1), a(1,2), a(2,1), a(2,2)) / det;
-		result(1,0) = det22(a(1,2), a(1,0), a(2,2), a(2,0)) / det;
-		result(1,1) = det22(a(0,0), a(0,2), a(2,0), a(2,2)) / det;
-		result(2,0) = det22(a(1,0), a(1,1), a(2,0), a(2,1)) / det;
-		result(2,1) = det22(a(0,1), a(0,0), a(2,1), a(2,0)) / det;
-		result(2,2) = det22(a(0,0), a(0,1), a(1,0), a(1,1)) / det;
-		return result;
-	}
-};
-
-template<typename Real>
-Tensor<Real, Upper<3>> cross(Tensor<Real, Upper<3>> a, Tensor<Real, Upper<3>> b) {
-	Tensor<Real, Upper<3>> c;
-	c(0) = a(1) * b(2) - a(2) * b(1);
-	c(1) = a(2) * b(0) - a(0) * b(2);
-	c(2) = a(0) * b(1) - a(1) * b(0);
-	return c;
-}
-
-}
-
 //enable this to use the J vector to calculate the A vector, to calculate the E & B vectors
 //disable to specify E & B directly
 //#define USE_CHARGE_CURRENT_FOR_EM
@@ -100,40 +68,56 @@ using real = double;
 static constexpr auto subDim = 3;	//spatial dim
 static constexpr auto dim = subDim+1;
 
+template<typename T>
+using vecDim = Tensor::v2::_vec<T,dim>;
+
+template<typename T>
+using vecSubDim = Tensor::v2::_vec<T,subDim>;
+
+template<typename T>
+using symDim = Tensor::v2::_sym<T,dim>;
+
+template<typename T>
+using symSubDim = Tensor::v2::_sym<T,subDim>;
+
+
 //subDim
-using realSub = Tensor::v2::_vec<real,subDim>;
-using realSubxSub = Tensor::v2::_mat<real,subDim,subDim>;
-using realSymSub = Tensor::v2::_sym<real,subDim>;
+using real_Sub = vecSubDim<real>;
+using real_Sub_Sub = vecSubDim<vecSubDim<real>>;
+using real_SymSub = symSubDim<real>;
 
 //dim
-using realN = Tensor::v2::_vec<real,dim>;
+using real_Dim = vecDim<real>;
 
-using realSym = Tensor::v2::_sym<real,dim>;
-using realNxN = Tensor::v2::_mat<real,dim,dim>;
+using real_SymDim = symDim<real>;
+using real_Dim_Dim = vecDim<vecDim<real>>;
 
-using realNxSym = Tensor::v2::_vec<realSym, dim>;
-using realSymxN = Tensor::v2::_sym<realN, dim>;
-using realNxNxN = Tensor::v2::_tensor<real, dim, dim, dim>;
+using real_Dim_SymDim = vecDim<symDim<real>>;
+using real_SymDim_Dim = symDim<vecDim<real>>;
+
+using real_Dim_Dim_Dim = vecDim<vecDim<vecDim<real>>>;	//Tensor::v2::_tensor<real, dim, dim, dim>;
 /* 
 TODO generalize: 
-realSymxN = _tensor<real, _realSym<dim>, _real<dim>>;
-realNxNxN = _tensor<real, _real<dim>, _real<dim>, _real<dim>>;
+real_SymDim_Dim = _tensor<real, _realSym<dim>, _real<dim>>;
+real_Dim_Dim_Dim = _tensor<real, _real<dim>, _real<dim>, _real<dim>>;
 where each arg is a single-arg template that gets concatenated
 */
 
-using realNxSymxN = Tensor::v2::_vec<Tensor::v2::_sym<realN, dim>, dim>;
-using realSymxSym = Tensor::v2::_sym<realSym,dim>;
-using realNxNxNxN = Tensor::v2::_tensor<real, dim, dim, dim, dim>;
+using real_Dim_SymDim_Dim = vecDim<symDim<vecDim<real>>>;
+using real_SymDim_SymDim = symDim<symDim<real>>;
+using real_Dim_Dim_Dim_Dim = vecDim<vecDim<vecDim<vecDim<real>>>>; //Tensor::v2::_tensor<real, dim, dim, dim, dim>;
 
 //mixed subDim & dim
-using TensorLsubSL = ::Tensor::Tensor<real, Tensor::Lower<subDim>, Tensor::Symmetric<Tensor::Lower<dim>, Tensor::Lower<dim>>>;
-using TensorLsubUSL = ::Tensor::Tensor<real, Tensor::Lower<subDim>, Tensor::Upper<dim>, Tensor::Symmetric<Tensor::Lower<dim>, Tensor::Lower<dim>>>;
-using TensorLsubSLL = ::Tensor::Tensor<real, Tensor::Lower<subDim>, Tensor::Symmetric<Tensor::Lower<dim>, Tensor::Lower<dim>>, Tensor::Lower<dim>>;
+using real_Sub_SymDim = vecSubDim<symDim<real>>;
+using real_Sub_Dim_SymDim = vecSubDim<vecDim<symDim<real>>>;
+using real_Sub_SymDim_Dim = vecSubDim<symDim<vecDim<real>>>;
+
+using int_Sub = vecSubDim<int>;
 
 template<typename T>
 struct gridFromPtr {
 	Tensor::Grid<T, subDim> grid;
-	gridFromPtr(real* ptr, Tensor::Vector<int, subDim> size) {
+	gridFromPtr(real* ptr, int_Sub size) {
 		grid.v = (T*)ptr;
 		grid.size = size;
 		grid.step(0) = 1;
@@ -141,7 +125,7 @@ struct gridFromPtr {
 			grid.step(i) = grid.step(i-1) * grid.size(i-1);
 		}
 	}
-	gridFromPtr(real const * ptr, Tensor::Vector<int, subDim> size) {
+	gridFromPtr(real const * ptr, int_Sub size) {
 		grid.v = (T*)ptr;
 		grid.size = size;
 		grid.step(0) = 1;
@@ -150,38 +134,21 @@ struct gridFromPtr {
 		}
 	}
 	~gridFromPtr() {
-		grid.v = NULL;	//don't deallocate
+		grid.v = {};	//don't deallocate
 	}
 };
 
-//until I can get the above working ...
-realSymSub inverse(realSymSub const & gammaLL) {
-	//why doesn't this call work?
-	//realSymSub gammaUU = inverse<realSymSub>(gammaLL);
-	//oh well, here's the body:
-	//symmetric, so only do Lower triangular
-	realSymSub gammaUU;
-	real det = Tensor::determinant33<real, realSymSub>(gammaLL);
-	gammaUU(0,0) = Tensor::det22(gammaLL(1,1), gammaLL(1,2), gammaLL(2,1), gammaLL(2,2)) / det;
-	gammaUU(1,0) = Tensor::det22(gammaLL(1,2), gammaLL(1,0), gammaLL(2,2), gammaLL(2,0)) / det;
-	gammaUU(1,1) = Tensor::det22(gammaLL(0,0), gammaLL(0,2), gammaLL(2,0), gammaLL(2,2)) / det;
-	gammaUU(2,0) = Tensor::det22(gammaLL(1,0), gammaLL(1,1), gammaLL(2,0), gammaLL(2,1)) / det;
-	gammaUU(2,1) = Tensor::det22(gammaLL(0,1), gammaLL(0,0), gammaLL(2,1), gammaLL(2,0)) / det;
-	gammaUU(2,2) = Tensor::det22(gammaLL(0,0), gammaLL(0,1), gammaLL(1,0), gammaLL(1,1)) / det;
-	return gammaUU;
-}
-
-real determinant44(realSym const & m) {
+real determinant44(real_SymDim const & m) {
 	real sign = 1;
 	real sum = 0;
 	for (int a = 0; a < 4; ++a) {
-		realSubxSub subm;
+		real_Sub_Sub subm;
 		for (int i = 0; i < 3; ++i) {
 			for (int j = 0; j < 3; ++j) {
 				subm(i,j) = m(i+1, j + (j>=a));
 			}
 		}
-		sum += sign * m(0,a) * Tensor::determinant33<real, realSubxSub>(subm);
+		sum += sign * m(0,a) * Tensor::v2::determinant(subm);
 		sign = -sign;
 	}
 	return sum;
@@ -191,8 +158,8 @@ real determinant44(realSym const & m) {
 //dim * (dim+1) / 2 vars
 struct MetricPrims {
 	real alphaMinusOne;
-	realSub betaU;
-	realSymSub hLL;	//h_ij = gamma_ij - delta_ij
+	real_Sub betaU;
+	real_SymSub hLL;	//h_ij = gamma_ij - delta_ij
 	MetricPrims() : alphaMinusOne(0) {}
 };
 
@@ -205,7 +172,7 @@ struct StressEnergyPrims {
 	real eInt;	//specific internal energy
 
 	bool useV;
-	realSub v;	//3-vel (upper, spatial)
+	real_Sub v;	//3-vel (upper, spatial)
 
 	bool useEM;
 #ifdef USE_CHARGE_CURRENT_FOR_EM
@@ -226,12 +193,12 @@ struct StressEnergyPrims {
 	can any A be computed by a given E & B?
 	*/
 	real chargeDensity;
-	realSub currentDensity;	//TODO how does this relate to matter density?
+	real_Sub currentDensity;	//TODO how does this relate to matter density?
 #else	//USE_CHARGE_CURRENT_FOR_EM
 	//electric & magnetic fields, which are used in the EM stress-energy tensor, and are derived from A, which is the inverse de Rham of J
 	//(can any E & B be represented by a valid A, & subsequently J?)
 	//these are upper and spatial-only
-	realSub E, B;
+	real_Sub E, B;
 #endif	//USE_CHARGE_CURRENT_FOR_EM
 	/*
 	1) specify charge density and current density -- components of J^a
@@ -282,14 +249,14 @@ int gridVolume;
 Tensor::Vector<real, subDim> dx;
 
 //some helper storage...
-Tensor::Grid<realSym, subDim> gLLs;
-Tensor::Grid<realSym, subDim> gUUs;
-Tensor::Grid<realSym, subDim> dt_gLLs;
-Tensor::Grid<realSym, subDim> d2t_gLLs;
-//Tensor::Grid<realSym, subDim> dt_gUUs;
-Tensor::Grid<realSymxN, subDim> dgLLLs;
-//Tensor::Grid<realNxSym, subDim> GammaLLLs;
-Tensor::Grid<realNxSym, subDim> GammaULLs;
+Tensor::Grid<real_SymDim, subDim> gLLs;
+Tensor::Grid<real_SymDim, subDim> gUUs;
+Tensor::Grid<real_SymDim, subDim> dt_gLLs;
+Tensor::Grid<real_SymDim, subDim> d2t_gLLs;
+//Tensor::Grid<real_SymDim, subDim> dt_gUUs;
+Tensor::Grid<real_SymDim_Dim, subDim> dgLLLs;
+//Tensor::Grid<real_Dim_SymDim, subDim> GammaLLLs;
+Tensor::Grid<real_Dim_SymDim, subDim> GammaULLs;
 
 template<typename CellType>
 void allocateGrid(Tensor::Grid<CellType, subDim>& grid, std::string name, Tensor::Vector<int, subDim> sizev, size_t& totalSize) {
@@ -299,14 +266,14 @@ void allocateGrid(Tensor::Grid<CellType, subDim>& grid, std::string name, Tensor
 	grid.resize(sizev);
 }
 
-static realSymSub make_delta3LL() {
-	realSymSub delta3LL;
+static real_SymSub make_delta3LL() {
+	real_SymSub delta3LL;
 	delta3LL(0,0) = 1.;
 	delta3LL(1,1) = 1.;
 	delta3LL(2,2) = 1.;
 	return delta3LL;
 }
-realSymSub delta3LL = make_delta3LL();
+real_SymSub delta3LL = make_delta3LL();
 
 /*
 calculates contents of gUUs, gLLs
@@ -319,9 +286,9 @@ void calc_gLLs_and_gUUs(
 	Tensor::Grid<MetricPrims, subDim> const & metricPrimGrid,
 	Tensor::Grid<MetricPrims, subDim> const & dt_metricPrimGrid,	//first deriv
 	//output:
-	Tensor::Grid<realSym, subDim>& gLLs,
-	Tensor::Grid<realSym, subDim>& gUUs,
-	Tensor::Grid<realSym, subDim>& dt_gLLs	//first deriv
+	Tensor::Grid<real_SymDim, subDim>& gLLs,
+	Tensor::Grid<real_SymDim, subDim>& gUUs,
+	Tensor::Grid<real_SymDim, subDim>& dt_gLLs	//first deriv
 ) {
 	//calculate gLL and gUU from metric primitives
 	Tensor::RangeObj<subDim> range(Tensor::Vector<int,subDim>(), sizev);
@@ -332,15 +299,15 @@ void calc_gLLs_and_gUUs(
 //looks like, for the Krylov solvers, we have a problem of A(x) producing zero and A(A(x)) giving us zeros here ... which cause singular basises
 //lesson: the problem isn't linear.  don't use Krylov solvers.
 assert(alpha != 0);
-		realSub const & betaU = metricPrims.betaU;
-		realSymSub gammaLL = metricPrims.hLL + delta3LL;
+		real_Sub const & betaU = metricPrims.betaU;
+		real_SymSub gammaLL = metricPrims.hLL + delta3LL;
 	
 		//I can only solve for one of these.  or can I do more?  without solving for d/dt variables, I am solving 10 unknowns for 10 constraints. 
 		MetricPrims const & dt_metricPrims = dt_metricPrimGrid(index);
 
 		real alphaSq = alpha * alpha;
 
-		realSub betaL;
+		real_Sub betaL;
 		for (int i = 0; i < subDim; ++i) {
 			betaL(i) = 0;
 			for (int j = 0; j < subDim; ++j) {
@@ -356,7 +323,7 @@ assert(alpha != 0);
 		//compute ADM metrics
 	
 		//g_ab
-		realSym & gLL = gLLs(index);
+		real_SymDim & gLL = gLLs(index);
 		gLL(0,0) = -alphaSq + betaSq;
 		for (int i = 0; i < subDim; ++i) {
 			gLL(i+1,0) = betaL(i);
@@ -366,11 +333,11 @@ assert(alpha != 0);
 		}
 
 		real dt_alpha = dt_metricPrims.alphaMinusOne;
-		realSub const & dt_betaU = dt_metricPrims.betaU;
-		realSymSub dt_gammaLL = dt_metricPrims.hLL;
+		real_Sub const & dt_betaU = dt_metricPrims.betaU;
+		real_SymSub dt_gammaLL = dt_metricPrims.hLL;
 		
 		//g_ab,t
-		realSym & dt_gLL = dt_gLLs(index);
+		real_SymDim & dt_gLL = dt_gLLs(index);
 		//g_tt,t = (-alpha^2 + beta^2),t
 		//		 = -2 alpha alpha,t + 2 beta^i_,t beta_i + beta^i beta^j gamma_ij,t
 		dt_gLL(0,0) = -2. * alpha * dt_alpha;
@@ -396,10 +363,10 @@ assert(alpha != 0);
 		}
 	
 		//gamma^ij
-		realSymSub gammaUU = inverse(gammaLL);
+		real_SymSub gammaUU = Tensor::v2::inverse(gammaLL);
 
 		//g^ab
-		realSym & gUU = gUUs(index);
+		real_SymDim & gUU = gUUs(index);
 		gUU(0,0) = -1/alphaSq;
 		for (int i = 0; i < subDim; ++i) {
 			gUU(i+1,0) = betaU(i) / alphaSq;
@@ -419,8 +386,8 @@ for (int a = 0; a < dim; ++a) {
 		//https://math.stackexchange.com/questions/1187861/derivative-of-transpose-of-inverse-of-matrix-with-respect-to-matrix
 		//d/dt AInv_kl = dAInv_kl / dA_ij d/dt A_ij
 		//= -AInv_ki (d/dt A_ij) AInv_jl
-		realSymSub dt_gammaUU;
-		realSubxSub tmp;
+		real_SymSub dt_gammaUU;
+		real_Sub_Sub tmp;
 		for (int k = 0; k < subDim; ++k) {
 			for (int j = 0; j < subDim; ++j) {
 				real sum = 0;
@@ -442,7 +409,7 @@ for (int a = 0; a < dim; ++a) {
 
 		/*
 		//g^ab_,t
-		realSym &dt_gUU = dt_gUUs(index);
+		real_SymDim &dt_gUU = dt_gUUs(index);
 		//g^tt_,t = (-1/alpha^2),t = 2 alpha,t / alpha^3
 		dt_gUU(0,0) = 2. * dt_alpha / (alpha * alphaSq);
 		//g^ti_,t = (beta^i/alpha^2),t = beta^i_,t / alpha^2 - 2 beta^i alpha,t / alpha^3
@@ -466,12 +433,12 @@ prereq: calc_gLLs_and_gUUs()
 */
 void calc_GammaULLs(
 	//input:
-	Tensor::Grid<realSym, subDim> const & gLLs,
-	Tensor::Grid<realSym, subDim> const & gUUs,
-	Tensor::Grid<realSym, subDim> const & dt_gLLs,	//first deriv
+	Tensor::Grid<real_SymDim, subDim> const & gLLs,
+	Tensor::Grid<real_SymDim, subDim> const & gUUs,
+	Tensor::Grid<real_SymDim, subDim> const & dt_gLLs,	//first deriv
 	//output:
-	Tensor::Grid<realNxSym, subDim>& GammaULLs
-	//Tensor::Grid<realNxSym, subDim>& GammaLLLs	//second deriv
+	Tensor::Grid<real_Dim_SymDim, subDim>& GammaULLs
+	//Tensor::Grid<real_Dim_SymDim, subDim>& GammaLLLs	//second deriv
 ) {
 	Tensor::RangeObj<subDim> range(Tensor::Vector<int,subDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](Tensor::Vector<int, subDim> const & index) {
@@ -479,12 +446,12 @@ void calc_GammaULLs(
 		//the templated method (1) stores derivative first and (2) only stores spatial
 #warning "TODO get this working with ::v2"
 #if 1 
-		TensorLsubSL dgLLL3;
+		real_Sub_SymDim dgLLL3;
 #else		
-		TensorLsubSL dgLLL3 = Tensor::partialDerivative<partialDerivativeOrder, real, subDim, realSym>(
+		real_Sub_SymDim dgLLL3 = Tensor::partialDerivative<partialDerivativeOrder, real, subDim, real_SymDim>(
 			index, dx,
 			[&](Tensor::Vector<int, subDim> index)
-				-> realSym
+				-> real_SymDim
 			{
 				for (int i = 0; i < subDim; ++i) {
 					index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
@@ -493,8 +460,8 @@ void calc_GammaULLs(
 			}
 		);
 #endif		
-		realSym const & dt_gLL = dt_gLLs(index);
-		realSymxN & dgLLL = dgLLLs(index);
+		real_SymDim const & dt_gLL = dt_gLLs(index);
+		real_SymDim_Dim & dgLLL = dgLLLs(index);
 		for (int a = 0; a < dim; ++a) {
 			for (int b = 0; b < dim; ++b) {	
 				dgLLL(a,b,0) = dt_gLL(a,b);
@@ -505,8 +472,8 @@ void calc_GammaULLs(
 		}
 		
 		//connections
-		//realNxSym & GammaLLL = GammaLLLs(index);
-		realNxSym GammaLLL;
+		//real_Dim_SymDim & GammaLLL = GammaLLLs(index);
+		real_Dim_SymDim GammaLLL;
 		for (int a = 0; a < dim; ++a) {
 			for (int b = 0; b < dim; ++b) {
 				for (int c = 0; c <= b; ++c) {
@@ -517,8 +484,8 @@ assert(GammaLLL(a,b,c) == GammaLLL(a,b,c));
 			}
 		}
 		
-		realSym const & gUU = gUUs(index);		
-		realNxSym & GammaULL = GammaULLs(index);
+		real_SymDim const & gUU = gUUs(index);		
+		real_Dim_SymDim & GammaULL = GammaULLs(index);
 		for (int a = 0; a < dim; ++a) {
 			for (int b = 0; b < dim; ++b) {
 				for (int c = 0; c <= b; ++c) {
@@ -541,20 +508,20 @@ depends on GammaULLs, gLLs, gUUs
 	second deriv: dt_gUUs, GammaLLLs
 prereq: calc_gLLs_and_gUUs(), calc_GammaULLs()
 */
-realSym calc_EinsteinLL(
+real_SymDim calc_EinsteinLL(
 	//input
 	Tensor::Vector<int, subDim> index,
-	Tensor::Grid<realSym, subDim> const & gLLs,
-	Tensor::Grid<realSym, subDim> const & gUUs,
-	Tensor::Grid<realNxSym, subDim> const & GammaULLs
+	Tensor::Grid<real_SymDim, subDim> const & gLLs,
+	Tensor::Grid<real_SymDim, subDim> const & gUUs,
+	Tensor::Grid<real_Dim_SymDim, subDim> const & GammaULLs
 ) {
-	realSym const & gUU = gUUs(index);
-	realSymxN const & dgLLL = dgLLLs(index);
-	realNxSym const & GammaULL = GammaULLs(index);
+	real_SymDim const & gUU = gUUs(index);
+	real_SymDim_Dim const & dgLLL = dgLLLs(index);
+	real_Dim_SymDim const & GammaULL = GammaULLs(index);
 #if 0	//calc first derivative of Gamma^a_bc's
 	//connection derivative
-	TensorLsubUSL dGammaLULL3 = Tensor::partialDerivative<partialDerivativeOrder, real, subDim, realNxSym>(
-		index, dx, [&](Tensor::Vector<int, subDim> index) -> realNxSym {
+	real_Sub_Dim_SymDim dGammaLULL3 = Tensor::partialDerivative<partialDerivativeOrder, real, subDim, real_Dim_SymDim>(
+		index, dx, [&](Tensor::Vector<int, subDim> index) -> real_Dim_SymDim {
 			for (int i = 0; i < subDim; ++i) {
 				index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
 			}
@@ -572,10 +539,10 @@ for (int i = 0; i < dim; ++i) {
 			return GammaULLs(index);
 		});
 	
-	//realSym const & dt_gUU = dt_gUUs(index);
-	//realNxSym const & GammaLLL = GammaLLLs(index);
+	//real_SymDim const & dt_gUU = dt_gUUs(index);
+	//real_Dim_SymDim const & GammaLLL = GammaLLLs(index);
 
-	realNxSymxN dGammaULLL;
+	real_Dim_SymDim_Dim dGammaULLL;
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b < dim; ++b) {
 			for (int c = 0; c <= b; ++c) {
@@ -603,7 +570,7 @@ Gamma^a_bc,d = 1/2 (g^ae (g_eb,c + g_ec,b - g_bc,e)),d
 	= -g^ae g_ef,d Gamma^f_bc + 1/2 g^ae (g_eb,cd + g_ec,bd - g_bc,ed)
 */
 	//g^ae g_ef,d
-	realNxNxN gdgULL;
+	real_Dim_Dim_Dim gdgULL;
 	for (int a = 0; a < 4; ++a) {
 		for (int f = 0; f < 4; ++f) {
 			for (int d = 0; d < 4; ++d) {
@@ -619,12 +586,12 @@ Gamma^a_bc,d = 1/2 (g^ae (g_eb,c + g_ec,b - g_bc,e)),d
 	//g_ab,ci
 #warning "TODO get this working with ::v2"
 #if 1
-	TensorLsubSLL d2gLLLL3;
+	real_Sub_SymDim_Dim d2gLLLL3;
 #else	
-	TensorLsubSLL d2gLLLL3 = Tensor::partialDerivative<partialDerivativeOrder, real, subDim, realSymxN>(
+	real_Sub_SymDim_Dim d2gLLLL3 = Tensor::partialDerivative<partialDerivativeOrder, real, subDim, real_SymDim_Dim>(
 		index, dx,
 		[&](Tensor::Vector<int, subDim> index)
-			-> realSymxN
+			-> real_SymDim_Dim
 		{
 			for (int i = 0; i < subDim; ++i) {
 				index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
@@ -635,8 +602,8 @@ Gamma^a_bc,d = 1/2 (g^ae (g_eb,c + g_ec,b - g_bc,e)),d
 #endif
 
 	//g_ab,cd
-	realSymxSym d2gLLLL;
-	realSym const & d2t_gLL = d2t_gLLs(index);
+	real_SymDim_SymDim d2gLLLL;
+	real_SymDim const & d2t_gLL = d2t_gLLs(index);
 	for (int a = 0; a < 4; ++a) {
 		for (int b = 0; b <= a; ++b) {
 			for (int c = 0; c < 4; ++c) {
@@ -652,9 +619,9 @@ Gamma^a_bc,d = 1/2 (g^ae (g_eb,c + g_ec,b - g_bc,e)),d
 							Tensor::Vector<int, subDim> ixm = index;
 							ixm(c) = std::max(ixm(c) - 1, 0);
 							
-							realSymxN const & dgLLL_ix = dgLLLs(index);
-							realSymxN const & dgLLL_ixp = dgLLLs(ixp);
-							realSymxN const & dgLLL_ixm = dgLLLs(ixm);
+							real_SymDim_Dim const & dgLLL_ix = dgLLLs(index);
+							real_SymDim_Dim const & dgLLL_ixp = dgLLLs(ixp);
+							real_SymDim_Dim const & dgLLL_ixm = dgLLLs(ixm);
 							
 							d2gLLLL(a,b,c,d) = 
 								(dgLLL_ixp(a,b,c) 
@@ -671,7 +638,7 @@ Gamma^a_bc,d = 1/2 (g^ae (g_eb,c + g_ec,b - g_bc,e)),d
 	}
 
 	//Gamma^a_bcd = -g^ae g_ef,d Gamma^f_bc + 1/2 g^ae (g_eb,cd + g_ec,bd - g_bc,ed)
-	realNxSymxN dGammaULLL;
+	real_Dim_SymDim_Dim dGammaULLL;
 	for (int a = 0; a < 4; ++a) {
 		for (int b = 0; b < 4; ++b) {
 			for (int c = 0; c < 4; ++c) {
@@ -690,7 +657,7 @@ Gamma^a_bc,d = 1/2 (g^ae (g_eb,c + g_ec,b - g_bc,e)),d
 	}
 #endif
 #if 0	//calculate the Riemann, then the Ricci
-	realNxNxNxN GammaSqULLL;
+	real_Dim_Dim_Dim_Dim GammaSqULLL;
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b < dim; ++b) {
 			for (int c = 0; c < dim; ++c) {
@@ -726,7 +693,7 @@ assert(GammaSqULLL(a,b,c,d) == GammaSqULLL(a,b,c,d));
 	v^a_,bc + 
 
 	*/
-	realNxNxNxN RiemannULLL;
+	real_Dim_Dim_Dim_Dim RiemannULLL;
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b < dim; ++b) {
 			for (int c = 0; c < dim; ++c) {
@@ -739,7 +706,7 @@ assert(RiemannULLL(a,b,c,d) == RiemannULLL(a,b,c,d));
 		}
 	}
 
-	realSym RicciLL;
+	real_SymDim RicciLL;
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b < dim; ++b) {
 			real sum = 0;
@@ -752,7 +719,7 @@ assert(RicciLL(a,b) == RicciLL(a,b));
 		}
 	}
 #else	//just calculate the Ricci
-	realN Gamma12L;
+	real_Dim Gamma12L;
 	for (int a = 0; a < dim; ++a) {
 		real sum = 0;
 		for (int b = 0; b < dim; ++b) {
@@ -762,7 +729,7 @@ assert(RicciLL(a,b) == RicciLL(a,b));
 	}
 	
 	//R_ab = Gamma^c_ab,c - Gamma^c_ac,b + Gamma^d_ab Gamma^c_cd - Gamma^d_ac Gamma^c_bd
-	realSym RicciLL;
+	real_SymDim RicciLL;
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b < dim; ++b) {
 			real sum = 0;
@@ -788,8 +755,8 @@ assert(RicciLL(a,b) == RicciLL(a,b));
 //debugging
 assert(Gaussian == Gaussian);
 
-	realSym const & gLL = gLLs(index);
-	realSym EinsteinLL;
+	real_SymDim const & gLL = gLLs(index);
+	real_SymDim EinsteinLL;
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b < dim; ++b) {
 			EinsteinLL(a,b) = RicciLL(a,b) - .5 * Gaussian * gLL(a,b);
@@ -807,16 +774,16 @@ stores G_ab
 */
 void calc_EinsteinLLs(
 	//input
-	Tensor::Grid<realSym, subDim> const & gLLs,
-	Tensor::Grid<realSym, subDim> const & gUUs,
-	Tensor::Grid<realNxSym, subDim> const & GammaULLs,
+	Tensor::Grid<real_SymDim, subDim> const & gLLs,
+	Tensor::Grid<real_SymDim, subDim> const & gUUs,
+	Tensor::Grid<real_Dim_SymDim, subDim> const & GammaULLs,
 	//output:
-	Tensor::Grid<realSym, subDim> & EinsteinLLs
+	Tensor::Grid<real_SymDim, subDim> & EinsteinLLs
 ) {
 	Tensor::RangeObj<subDim> range(Tensor::Vector<int,subDim>(), sizev);
-	assert(sizeof(realSym) == sizeof(MetricPrims));	//10 reals for both
+	assert(sizeof(real_SymDim) == sizeof(MetricPrims));	//10 reals for both
 	parallel.foreach(range.begin(), range.end(), [&](Tensor::Vector<int, subDim> const & index) {
-		realSym & EinsteinLL = EinsteinLLs(index);
+		real_SymDim & EinsteinLL = EinsteinLLs(index);
 		EinsteinLL = calc_EinsteinLL(index, gLLs, gUUs, GammaULLs);
 
 //debugging
@@ -838,25 +805,25 @@ depends on: stressEnergyPrims, gLLs, calc_gLLs_and_gUUs()
 now compute stress-energy based on source terms
 notice: stress energy depends on gLL (i.e. alpha, betaU, gammaLL), which it is solving for, so this has to be recalculated every iteration
 */
-realSym calc_8piTLL(
+real_SymDim calc_8piTLL(
 	MetricPrims const & metricPrims,
-	realSym const & gLL,
-	realSym const & gUU,
+	real_SymDim const & gLL,
+	real_SymDim const & gUU,
 	StressEnergyPrims const & stressEnergyPrims
 ) {
-	realSymSub gammaLL = metricPrims.hLL + delta3LL;
+	real_SymSub gammaLL = metricPrims.hLL + delta3LL;
 
 	//electromagnetic stress-energy
-	realSym T_EM_LL;
+	real_SymDim T_EM_LL;
 	if (stressEnergyPrims.useEM) {
 
 #ifdef USE_CHARGE_CURRENT_FOR_EM
-		realN JU;
+		real_Dim JU;
 		JU(0) = stressEnergyPrims.chargeDensity;
 		for (int i = 0; i < subDim; ++i) {
 			JU(i+1) = stressEnergyPrims.currentDensity(i);
 		}
-		realN AU = JU;
+		real_Dim AU = JU;
 		/*
 		A^a;u = A^a_;v g^uv = (A^a_,v + Gamma^a_wv A^w) g^uv
 		A^a;u_;u = A^a;u_,u + Gamma^a_bu A^b;u + Gamma^u_bu A^a;b
@@ -878,8 +845,8 @@ realSym calc_8piTLL(
 			}
 		);
 #else	//USE_CHARGE_CURRENT_FOR_EM
-		realSub E = stressEnergyPrims.E;
-		realSub B = stressEnergyPrims.B;
+		real_Sub E = stressEnergyPrims.E;
+		real_Sub B = stressEnergyPrims.B;
 #endif
 		
 		//should I be doing a full 4x4 determinant?
@@ -887,13 +854,13 @@ realSym calc_8piTLL(
 		real sqrtDetG = sqrt(fabs(determinant44(gLL)));
 	
 		//n_a = t_,a
-		realN nL;
+		real_Dim nL;
 		for (int a = 0; a < 4; ++a) {
 			nL(a) = a == 0 ? 1 : 0;
 		}
 	
 		//n^a = g^ab n_b
-		realN nU;
+		real_Dim nU;
 		for (int a = 0; a < 4; ++a) {
 			real sum = 0;
 			for (int b = 0; b < 4; ++b) {
@@ -902,13 +869,13 @@ realSym calc_8piTLL(
 			nU(a) = sum;
 		}
 
-		realN BU, EU;
+		real_Dim BU, EU;
 		for (int i = 0; i < 3; ++i) {
 			BU(i+1) = B(i);
 			EU(i+1) = E(i);
 		}
 	
-		realN EL;
+		real_Dim EL;
 		for (int a = 0; a < 4; ++a) {
 			real sum = 0;
 			for (int b = 0; b < 4; ++b) {
@@ -922,7 +889,7 @@ realSym calc_8piTLL(
 		//	= E_a n_b - n_a E_b - sqrt|g| n^c [abcd] B^d
 		//	= E_a n_b - n_a E_b - sqrt|g| n^c [abcd] B^d
 		//assuming E and B are specified in Cartesian coordinates as one-forms
-		realNxN F_LL;
+		real_Dim_Dim F_LL;
 		for (int a = 0; a < dim; ++a) {
 			for (int b = 0; b < dim; ++b) {
 				F_LL(a,b) = EL(a) * nL(b) - nL(a) * EL(b);
@@ -938,7 +905,7 @@ realSym calc_8piTLL(
 		ADD_B_TO_F(1,3,2,0)	//+ 1 3 2 0, - 1 3 0 2
 		ADD_B_TO_F(2,3,0,1)	//+ 2 3 0 1, - 2 3 1 0
 
-		realNxN F_LU;
+		real_Dim_Dim F_LU;
 		for (int a = 0; a < dim; ++a) {
 			for (int b = 0; b < dim; ++b) {
 				real sum = 0;
@@ -949,7 +916,7 @@ realSym calc_8piTLL(
 			}
 		}
 		
-		realNxN F_UU;
+		real_Dim_Dim F_UU;
 		for (int a = 0; a < dim; ++a) {
 			for (int b = 0; b < dim; ++b) {
 				real sum = 0;
@@ -981,9 +948,9 @@ realSym calc_8piTLL(
 
 	//matter stress-energy
 
-	realN uL;
+	real_Dim uL;
 	if (stressEnergyPrims.useV) {
-		realSub const & v = stressEnergyPrims.v;
+		real_Sub const & v = stressEnergyPrims.v;
 
 		//Lorentz factor
 		real vLenSq = 0;
@@ -995,7 +962,7 @@ realSym calc_8piTLL(
 		real W = 1 / sqrt( 1 - sqrt(vLenSq) );
 
 		//4-vel upper
-		realN uU;
+		real_Dim uU;
 		uU(0) = W;
 		for (int i = 0; i < subDim; ++i) {
 			uU(i+1) = W * v(i);
@@ -1026,7 +993,7 @@ realSym calc_8piTLL(
 		sigma^ab = 1/2(u^a_;u P^ub + u^b_;u P^ua) - theta P^ab / 3 = shear
 		theta = u^a_;a = expansion
 	*/	
-	realSym T_matter_LL;
+	real_SymDim T_matter_LL;
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b <= a; ++b) {
 			T_matter_LL(a,b) = uL(a) * uL(b) * (stressEnergyPrims.rho * (1 + stressEnergyPrims.eInt) + stressEnergyPrims.P) + gLL(a,b) * stressEnergyPrims.P;
@@ -1034,7 +1001,7 @@ realSym calc_8piTLL(
 	}
 
 	//total stress-energy	
-	realSym _8piT_LL;
+	real_SymDim _8piT_LL;
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b <= a; ++b) {
 			_8piT_LL(a,b) = (T_EM_LL(a,b) + T_matter_LL(a,b)) * 8. * M_PI;
@@ -1053,14 +1020,14 @@ void calc_EFE_constraint(
 	Tensor::Grid<MetricPrims, subDim> const & metricPrimGrid,
 	Tensor::Grid<StressEnergyPrims, subDim> const & stressEnergyPrimGrid,
 	//output
-	Tensor::Grid<realSym, subDim>& EFEGrid
+	Tensor::Grid<real_SymDim, subDim>& EFEGrid
 ) {
 	Tensor::RangeObj<subDim> range(Tensor::Vector<int,subDim>(), sizev);
 	parallel.foreach(range.begin(), range.end(), [&](Tensor::Vector<int, subDim> const & index) {
 		
 		//for the JFNK solver that doesn't cache the EinsteinLL tensors
 		// no need to allocate for both an EinsteinLL grid and a EFEGrid
-		realSym EinsteinLL = calc_EinsteinLL(index, gLLs, gUUs, GammaULLs);
+		real_SymDim EinsteinLL = calc_EinsteinLL(index, gLLs, gUUs, GammaULLs);
 		
 		//now we want to find the zeroes of EinsteinLL(a,b) - 8 pi T(a,b)
 		// ... which is 10 zeroes ...
@@ -1068,7 +1035,7 @@ void calc_EFE_constraint(
 		// alpha, beta x3, gamma x6
 		// ... which is 10 variables
 		// tada!
-		realSym _8piT_LL = calc_8piTLL(
+		real_SymDim _8piT_LL = calc_8piTLL(
 			metricPrimGrid(index),
 			gLLs(index),
 			gUUs(index),
@@ -1080,7 +1047,7 @@ void calc_EFE_constraint(
 		but it looks like, because T is based on g, it will really look like G(g_uv) = 8 pi T(g_uv, source terms)
 		*/
 		
-		realSym &EFE = EFEGrid(index);
+		real_SymDim &EFE = EFEGrid(index);
 		for (int a = 0; a < dim; ++a) {
 			for (int b = 0; b <= a; ++b) {
 				EFE(a,b) = EinsteinLL(a,b) - _8piT_LL(a,b);
@@ -1114,7 +1081,7 @@ struct KrylovSolver : public EFESolver {
 	using Super = EFESolver;
 	using Super::Super;
 	
-	Tensor::Grid<realSym, subDim> _8piTLLs;
+	Tensor::Grid<real_SymDim, subDim> _8piTLLs;
 	std::shared_ptr<Solver::Krylov<real>> krylov;
 
 	KrylovSolver(int maxiter)
@@ -1135,7 +1102,7 @@ struct KrylovSolver : public EFESolver {
 		Tensor::Grid<MetricPrims, subDim> const & metricPrimGrid,
 		Tensor::Grid<StressEnergyPrims, subDim> const & stressEnergyPrimGrid,
 		//output
-		Tensor::Grid<realSym, subDim>& _8piTLLs
+		Tensor::Grid<real_SymDim, subDim>& _8piTLLs
 	) {
 		Tensor::RangeObj<subDim> range(Tensor::Vector<int,subDim>(), sizev);
 		parallel.foreach(range.begin(), range.end(), [&](Tensor::Vector<int, subDim> const & index) {
@@ -1180,7 +1147,7 @@ for (int i = 0; i < (int)getN(); ++i) {
 		});
 		time("calculating G_ab", [&]{
 #endif
-			Tensor::Grid<realSym, subDim> EinsteinLLs(sizev, (realSym*)y);
+			Tensor::Grid<real_SymDim, subDim> EinsteinLLs(sizev, (real_SymDim*)y);
 			calc_EinsteinLLs(
 				//input
 				gLLs, gUUs, GammaULLs,
@@ -1398,7 +1365,7 @@ struct JFNK : public Solver::JFNK<real> {
 struct JFNKSolver : public EFESolver {
 	using Super = EFESolver;
 
-	Tensor::Grid<realSym, subDim> EFEGrid;	
+	Tensor::Grid<real_SymDim, subDim> EFEGrid;	
 
 	JFNKSolver(int maxiter)
 	: Super(maxiter)
@@ -1479,9 +1446,9 @@ struct JFNKSolver : public EFESolver {
 #endif
 
 #ifdef CONVERGE_ALPHA_ONLY
-				Tensor::Grid<realSym, subDim> EFEGrid(sizev);
+				Tensor::Grid<real_SymDim, subDim> EFEGrid(sizev);
 #else				
-				Tensor::Grid<realSym, subDim> EFEGrid(sizev, (realSym*)y);
+				Tensor::Grid<real_SymDim, subDim> EFEGrid(sizev, (real_SymDim*)y);
 #endif			
 				//EFE_ab = G_ab - 8 pi T_ab
 				//T_ab = stress energy constraint, whose calculations depend on g_ab and the stress-energy primitives 
@@ -1543,14 +1510,14 @@ std::for_each(range.begin(), range.end(), [&](Tensor::Vector<int, subDim> const 
 	}
 	
 	std::cout << " G_ab=";
-	realSym EinsteinLL = calc_EinsteinLL(index, gLLs, gUUs, GammaULLs);
+	real_SymDim EinsteinLL = calc_EinsteinLL(index, gLLs, gUUs, GammaULLs);
 	real* p = &EinsteinLL(0,0);
 	for (int j = 0; j < 10; ++j, ++p) {
 		std::cout << " " << *p;
 	}
 
 	std::cout << " 8piT_ab=";
-	realSym _8piT_LL = calc_8piTLL(Tensor::Grid<MetricPrims, subDim>(sizev, (MetricPrims const *)x)(index), gLLs(index), stressEnergyPrimGrid(index));
+	real_SymDim _8piT_LL = calc_8piTLL(Tensor::Grid<MetricPrims, subDim>(sizev, (MetricPrims const *)x)(index), gLLs(index), stressEnergyPrimGrid(index));
 	for (int a = 0; a < dim; ++a) {
 		for (int b = 0; b <= a; ++b) {
 			std::cout << " " << _8piT_LL(a,b);
@@ -1584,10 +1551,10 @@ std::for_each(range.begin(), range.end(), [&](Tensor::Vector<int, subDim> const 
 		jfnk.stopCallback = [&]()->bool{
 			
 #ifdef PRINT_RANGES
-			realSym gLL_mins, gLL_maxs;
-			realSym gUU_mins, gUU_maxs;
-			realNxSym GammaULL_mins, GammaULL_maxs;
-			realSym EFE_mins, EFE_maxs;
+			real_SymDim gLL_mins, gLL_maxs;
+			real_SymDim gUU_mins, gUU_maxs;
+			real_Dim_SymDim GammaULL_mins, GammaULL_maxs;
+			real_SymDim EFE_mins, EFE_maxs;
 			//TODO store EinsteinLL and _8piT_LL so I can see ranges on those too
 			for (int a = 0; a < dim; ++a) {
 				for (int b = 0; b <= a; ++b) {
@@ -1995,13 +1962,13 @@ struct StellarSchwarzschildInitCond : public SphericalBodyInitCond {
 			*/
 			//expanding ...
 			MetricPrims& dt_metricPrims = dt_metricPrimGrid(index);
-			realSub betaL;
+			real_Sub betaL;
 			for (int i = 0; i < subDim; ++i) {
 				//negate all gravity by throttling the change in space/time coupling of the metric
 				real dm_dr = 0;
 				betaL(i) = -(2*m * (r - 2*m) + 2 * dm_dr * r * (2*m - r)) / (2 * r * r * r) * xi(i)/r;
 			}
-			realSymSub gammaUU = inverse(metricPrims.hLL + delta3LL);
+			real_SymSub gammaUU = Tensor::v2::inverse(metricPrims.hLL + delta3LL);
 			for (int i = 0; i < subDim; ++i) {
 				real sum = 0;
 				for (int j = 0; j < subDim; ++j) {
@@ -2349,7 +2316,7 @@ std::cout << "creating body " << bodyName << std::endl;
 		calc_GammaULLs(gLLs, gUUs, dt_gLLs, GammaULLs);
 	});
 
-	Tensor::Grid<realSym, subDim> EFEGrid(sizev);
+	Tensor::Grid<real_SymDim, subDim> EFEGrid(sizev);
 	time("calculating EFE constraint", [&]{
 		calc_EFE_constraint(metricPrimGrid, stressEnergyPrimGrid, EFEGrid);
 	});
@@ -2361,7 +2328,7 @@ std::cout << "creating body " << bodyName << std::endl;
 			Tensor::Vector<real, subDim> xi = xs(index);
 			real r = xi.length();
 			//numerical computational...		
-			realNxSym & GammaULL = GammaULLs(index);
+			real_Dim_SymDim & GammaULL = GammaULLs(index);
 //the analytical calculations on these are identical, provided Gamma^i_tt is the schwarzschild metric connection
 //but the acceleration magnitude method can't show sign
 #if 1 // here's change-of-coordinate from G^i_tt to G^r_tt
@@ -2418,12 +2385,12 @@ std::cout << "creating body " << bodyName << std::endl;
 			{"iy", [&](Tensor::Vector<int,subDim> index)->real{ return index(1); }},
 			{"iz", [&](Tensor::Vector<int,subDim> index)->real{ return index(2); }},
 			{"rho", [&](Tensor::Vector<int,subDim> index)->real{ return stressEnergyPrimGrid(index).rho; }},
-			{"det_h", [&](Tensor::Vector<int,subDim> index)->real{ return Tensor::determinant33<real, realSymSub>(metricPrimGrid(index).hLL); }},
+			{"det_h", [&](Tensor::Vector<int,subDim> index)->real{ return Tensor::determinant33<real, real_SymSub>(metricPrimGrid(index).hLL); }},
 			{"alpha-1", [&](Tensor::Vector<int,subDim> index)->real{ return metricPrimGrid(index).alphaMinusOne; }},
 #if 0	//within 1e-23			
 			{"ortho_error", [&](Tensor::Vector<int,subDim> index)->real{
-				realSym const & gLL = gLLs(index);
-				realSym const & gUU = gUUs(index);
+				real_SymDim const & gLL = gLLs(index);
+				real_SymDim const & gUU = gUUs(index);
 				real err = 0;
 				for (int a = 0; a < dim; ++a) {
 					for (int b = 0; b < dim; ++b) {
@@ -2449,11 +2416,11 @@ std::cout << "creating body " << bodyName << std::endl;
 				return EFEGrid(index)(0,0) / (8. * M_PI) * c * c / G / 1000.;	// g/cm^3 ... so in absense of any curvature, the constraint error will now match the density
 			}},
 			{"EFE_ti", [&](Tensor::Vector<int,subDim> index)->real{ 
-				realSym &t = EFEGrid(index);
+				real_SymDim &t = EFEGrid(index);
 				return sqrt( t(0,1)*t(0,1) + t(0,2)*t(0,2) + t(0,3)*t(0,3) ) * c;
 			}},
 			{"EFE_ij", [&](Tensor::Vector<int,subDim> index) -> real {
-				realSym &t = EFEGrid(index);
+				real_SymDim &t = EFEGrid(index);
 				/* determinant
 				return t(1,1) * t(2,2) * t(3,3)
 					+ t(1,2) * t(2,3) * t(3,1)
@@ -2473,7 +2440,7 @@ std::cout << "creating body " << bodyName << std::endl;
 			}},
 #if 1
 			{"G_ab", [&](Tensor::Vector<int,subDim> index)->real{
-				realSym G = calc_EinsteinLL(index, gLLs, gUUs, GammaULLs);
+				real_SymDim G = calc_EinsteinLL(index, gLLs, gUUs, GammaULLs);
 				real sum = 0;
 				for (int a = 0; a < dim; ++a) {
 					for (int b = 0; b < dim; ++b) {

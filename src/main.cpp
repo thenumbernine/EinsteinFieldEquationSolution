@@ -2126,14 +2126,7 @@ std::cout << "creating body " << bodyName << std::endl;
 	xmin = {-bodyRadii*body->radius, -bodyRadii*body->radius, -bodyRadii*body->radius};
 	xmax = {bodyRadii*body->radius, bodyRadii*body->radius, bodyRadii*body->radius};
 	gridVolume = sizev.volume();
-#warning "TODO ctor of casting types, once you convert sizev to int_Sub, once you convert Tensor::Grid"
-#if 0	
 	dx = (xmax - xmin) / (real_Sub)sizev;
-#else
-	for (int i = 0; i < subDim; ++i) {
-		dx(i) = (xmax(i) - xmin(i)) / (real)sizev(i);
-	}
-#endif
 
 	Tensor::Grid<real_Sub, subDim> xs;
 	Tensor::Grid<MetricPrims, subDim> metricPrimGrid;

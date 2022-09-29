@@ -31,6 +31,7 @@ ostream& operator<<(ostream& o, __float128 f) {
 #include "Tensor/Derivative.h"
 #include "Tensor/Grid.h"
 #include "Tensor/Tensor.h"
+#include "Tensor/clamp.h"
 #include "Common/Exception.h"
 #include "Common/Macros.h"
 #include <functional>
@@ -430,9 +431,7 @@ void calc_GammaULLs(
 		real_Sub_SymDim dgLLL3 = Tensor::partialDerivative<partialDerivativeOrder, real, subDim, real_SymDim>(
 			index, dx,
 			[&](int_Sub index) -> real_SymDim {
-				for (int i = 0; i < subDim; ++i) {
-					index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
-				}
+				index = Tensor::clamp(index, int_Sub(), sizev-1);
 				return gLLs(index);
 			}
 		);
@@ -499,9 +498,7 @@ real_SymDim calc_EinsteinLL(
 	//connection derivative
 	real_Sub_Dim_SymDim dGammaLULL3 = Tensor::partialDerivative<partialDerivativeOrder, real, subDim, real_Dim_SymDim>(
 		index, dx, [&](int_Sub index) -> real_Dim_SymDim {
-			for (int i = 0; i < subDim; ++i) {
-				index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
-			}
+			index = Tensor::clamp(index, int_Sub(), sizev-1);
 
 //debugging
 #ifdef DEBUG
@@ -564,9 +561,7 @@ Gamma^a_bc,d = 1/2 (g^ae (g_eb,c + g_ec,b - g_bc,e)),d
 	real_Sub_SymDim_Dim d2gLLLL3 = Tensor::partialDerivative<partialDerivativeOrder, real, subDim, real_SymDim_Dim>(
 		index, dx,
 		[&](int_Sub index) -> real_SymDim_Dim {
-			for (int i = 0; i < subDim; ++i) {
-				index(i) = std::max<int>(0, std::min<int>(sizev(i)-1, index(i)));
-			}
+			index = Tensor::clamp(index, int_Sub(), sizev-1);
 			return dgLLLs(index);
 		}
 	);

@@ -87,32 +87,27 @@ using real_Sub_Sub = vecSubDim<vecSubDim<real>>;
 using real_SymSub = symSubDim<real>;
 
 //dim
-using real_Dim = vecDim<real>;
+using real_Dim = Tensor::_tensori<real, Tensor::index_vec<dim>>;
 
-using real_SymDim = symDim<real>;
-using real_Dim_Dim = vecDim<vecDim<real>>;
+using real_SymDim = Tensor::_tensori<real, Tensor::index_sym<dim>>;
+using real_Dim_Dim = Tensor::_tensori<real, Tensor::index_vec<dim>, Tensor::index_vec<dim>>;
 
-using real_Dim_SymDim = vecDim<symDim<real>>;
-using real_SymDim_Dim = symDim<vecDim<real>>;
+using real_Dim_SymDim = Tensor::_tensori<real, Tensor::index_vec<dim>, Tensor::index_sym<dim>>;
+using real_SymDim_Dim = Tensor::_tensori<real, Tensor::index_sym<dim>, Tensor::index_vec<dim>>;
 
-using real_Dim_Dim_Dim = vecDim<vecDim<vecDim<real>>>;	//Tensor::_tensor<real, dim, dim, dim>;
-/* 
-TODO generalize: 
-real_SymDim_Dim = _tensor<real, _realSym<dim>, _real<dim>>;
-real_Dim_Dim_Dim = _tensor<real, _real<dim>, _real<dim>, _real<dim>>;
-where each arg is a single-arg template that gets concatenated
-*/
+using real_Dim_Dim_Dim = Tensor::_tensor<real, dim, dim, dim>;
 
-using real_Dim_SymDim_Dim = vecDim<symDim<vecDim<real>>>;
-using real_SymDim_SymDim = symDim<symDim<real>>;
-using real_Dim_Dim_Dim_Dim = vecDim<vecDim<vecDim<vecDim<real>>>>; //Tensor::_tensor<real, dim, dim, dim, dim>;
+using real_Dim_SymDim_Dim = Tensor::_tensori<real, Tensor::index_vec<dim>, Tensor::index_sym<dim>, Tensor::index_vec<dim>>;
+using real_SymDim_SymDim = Tensor::_tensori<real, Tensor::index_sym<dim>, Tensor::index_sym<dim>>;
+using real_Dim_Dim_Dim_Dim = Tensor::_tensor<real, dim, dim, dim, dim>;
 
 //mixed subDim & dim
-using real_Sub_SymDim = vecSubDim<symDim<real>>;
-using real_Sub_Dim_SymDim = vecSubDim<vecDim<symDim<real>>>;
-using real_Sub_SymDim_Dim = vecSubDim<symDim<vecDim<real>>>;
+using real_Sub_SymDim = Tensor::_tensori<real, Tensor::index_vec<subDim>, Tensor::index_sym<dim>>;
+using real_Sub_Dim_SymDim = Tensor::_tensori<real, Tensor::index_vec<subDim>, Tensor::index_vec<dim>, Tensor::index_sym<dim>>;
+using real_Sub_SymDim_Dim = Tensor::_tensori<real, Tensor::index_vec<subDim>, Tensor::index_sym<dim>, Tensor::index_vec<dim>>;
 
 using int_Sub = vecSubDim<int>;
+using int_Sub = Tensor::_tensor<int, subDim>;
 
 template<typename T>
 struct gridFromPtr {

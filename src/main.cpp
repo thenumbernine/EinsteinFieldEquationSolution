@@ -1019,6 +1019,7 @@ void calc_EFE_constraint(
 struct EFESolver {
 	int maxiter;
 	EFESolver(int maxiter_) : maxiter(maxiter_) {}
+	virtual ~EFESolver() {}
 	size_t getN() { return sizeof(MetricPrims) / sizeof(real) * gridVolume; }
 	virtual void solve(
 		//input/output
@@ -1644,6 +1645,7 @@ struct Body {
 	real radius;
 
 	Body(real radius_) : radius(radius_) {}
+	virtual ~Body() {}
 
 	virtual void initStressEnergyPrim(
 		Tensor::Grid<StressEnergyPrims, subDim> & stressEnergyPrimGrid,
@@ -1653,7 +1655,6 @@ struct Body {
 
 struct NullBody : public Body {
 	using Body::Body;
-
 	virtual void initStressEnergyPrim(
 		Tensor::Grid<StressEnergyPrims, subDim>& stressEnergyPrimGrid,
 		Tensor::Grid<real_Sub, subDim> const & xs
@@ -1778,6 +1779,7 @@ struct EMLineBody : public Body {
 };
 
 struct InitCond {
+	virtual ~InitCond() {}
 	virtual void initMetricPrims(
 		Tensor::Grid<MetricPrims, subDim>& metricPrimGrid,
 		Tensor::Grid<real_Sub, subDim> const & xs

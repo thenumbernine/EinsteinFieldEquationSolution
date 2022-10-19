@@ -1,14 +1,18 @@
 # Einstein Field Equation solution calculator.
 
+[![Donate via Stripe](https://img.shields.io/badge/Donate-Stripe-green.svg)](https://buy.stripe.com/00gbJZ0OdcNs9zi288)<br>
+[![Donate via Bitcoin](https://img.shields.io/badge/Donate-Bitcoin-green.svg)](bitcoin:37fsp7qQKU8XoHZGRQvVzQVP8FrEJ73cSJ)<br>
+[![Donate via Paypal](https://img.shields.io/badge/Donate-Paypal-green.svg)](https://buy.stripe.com/00gbJZ0OdcNs9zi288)
+
 Accepts stress-energy source terms of matter (density, specific internal energy, pressure) and electromagnetism (electric field, magnetic field).
 
 Converges on solution via...
 * 1. linear solver with solution vector corresponding to stress-energy source terms (which is constantly changing per-iteration, since the stress-energy tensor is based on the metric, which is being solved for)
-* 2. JFNK solver whose zero is equal to the EFE: G_ab - 8 pi T_ab
+* 2. JFNK solver whose zero is equal to the EFE: $G\_ab - 8 \pi T\_ab$
 
 goals:
 * 1. (CHECK) verify Newtonian gravity matches Schwarzschild gravity from on to above the surface (I'm not doing this here, but I've done this in my solar system project)
-* 2. (CHECK) verify Schwarzschild stellar model gravity due to analytical connection equations is maximal at surface, ->0 as r->0 and r->infinity
+* 2. (CHECK) verify Schwarzschild stellar model gravity due to analytical connection equations is maximal at surface, $\rightarrow 0$ as $r \rightarrow 0$ and $r \rightarrow \infty$
 * 3. (CHECK) verify Schwarzschild stellar model gravity due to finite difference matches the analytical connection equation values
 * 4. (CHECK) verify, with flat spacetime and stellar stress-energy, that the EFE constraint error is equal to the stellar body stress-energy within the body, and zero elsewhere.
 * 5. (CHECK) verify, with Schwarzschild stellar model and stellar stress-energy, that the EFE constraint is near zero everywhere. ... well this works inside the planet and outside the planet, but on the changes in rho this has some numerical errors.

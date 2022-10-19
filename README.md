@@ -8,7 +8,7 @@ Accepts stress-energy source terms of matter (density, specific internal energy,
 
 Converges on solution via...
 * 1. linear solver with solution vector corresponding to stress-energy source terms (which is constantly changing per-iteration, since the stress-energy tensor is based on the metric, which is being solved for)
-* 2. JFNK solver whose zero is equal to the EFE: $G\_ab - 8 \pi T\_ab$
+* 2. JFNK solver whose zero is equal to the EFE: $G\_{ab} - 8 \pi T\_{ab}$
 
 goals:
 * 1. (CHECK) verify Newtonian gravity matches Schwarzschild gravity from on to above the surface (I'm not doing this here, but I've done this in my solar system project)

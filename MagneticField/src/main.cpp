@@ -128,21 +128,21 @@ void time(const std::string name, std::function<void()> f) {
 
 int main() {
 	size_t n = 16;	//64;
-	Tensor::Vector<int, gridDim> size;
+	Tensor::intN<gridDim> size;
 	for (int i = 0; i < gridDim; ++i) {
 		size(i) = n;
 	}
-	Tensor::Vector<real, gridDim> xmin(-1,-1,-1);
-	Tensor::Vector<real, gridDim> xmax(1,1,1);
-	Tensor::Vector<real, gridDim> dx = (xmax - xmin) / (Tensor::Vector<real,gridDim>)size;
-	Tensor::Grid<Tensor::Vector<real, stDim>, gridDim> JU(size);
-	Tensor::Grid<Tensor::Vector<real, stDim>, gridDim> AU(size);
+	Tensor::_vec<real, gridDim> xmin(-1,-1,-1);
+	Tensor::_vec<real, gridDim> xmax(1,1,1);
+	Tensor::_vec<real, gridDim> dx = (xmax - xmin) / (Tensor::_vec<real,gridDim>)size;
+	Tensor::Grid<Tensor::_vec<real, stDim>, gridDim> JU(size);
+	Tensor::Grid<Tensor::_vec<real, stDim>, gridDim> AU(size);
 
 	//solve for AU
 	Tensor::RangeObj<gridDim> range = JU.range();
 #if 0
-	parallel.foreach(range.begin(), range.end(), [&](const Tensor::Vector<int, gridDim>& index) {
-		Tensor::Vector<real,gridDim> x = ((Tensor::Vector<real,gridDim>)index + .5) - size/2;
+	parallel.foreach(range.begin(), range.end(), [&](const Tensor::intN<gridDim>& index) {
+		Tensor::_vec<real,gridDim> x = ((Tensor::_vec<real,gridDim>)index + .5) - size/2;
 		real linfDist = 0;
 		real sign = 1;
 		for (int i = 0; i < gridDim; ++i) {
@@ -181,13 +181,13 @@ int main() {
 		JU(x,y,z)(3) = 0;
 	}
 
-	parallel.foreach(range.begin(), range.end(), [&](const Tensor::Vector<int, gridDim>& index) {
+	parallel.foreach(range.begin(), range.end(), [&](const Tensor::intN<gridDim>& index) {
 		AU(index) = -JU(index);
 	});
 
 	Solver::Krylov<real>::Func A = [&](real* JU_, const real* AU_) {
-		Tensor::Grid<Tensor::Vector<real, stDim>, gridDim> JU(size, (Tensor::Vector<real,stDim>*)JU_);
-		Tensor::Grid<const Tensor::Vector<real, stDim>, gridDim> AU(size, (const Tensor::Vector<real,stDim>*)AU_);
+		Tensor::Grid<Tensor::_vec<real, stDim>, gridDim> JU(size, (Tensor::_vec<real,stDim>*)JU_);
+		Tensor::Grid<const Tensor::_vec<real, stDim>, gridDim> AU(size, (const Tensor::_vec<real,stDim>*)AU_);
 
 		//(ln sqrt|g|),a = Gamma^b_ab
 
@@ -210,26 +210,26 @@ int main() {
 		//A^a;b_;b
 
 		//solve for del A^i = J^i
-		parallel.foreach(range.begin(), range.end(), [&](const Tensor::Vector<int, gridDim>& index) {
+		parallel.foreach(range.begin(), range.end(), [&](const Tensor::intN<gridDim>& index) {
 #if 0	//set boundary to zero?
 			for (int k = 0; k < gridDim; ++k) {
 				if (index(k) == 0 || index(k) == (int)n-1) {
 					//set boundary to zero:
-					JU(index) = Tensor::Vector<real, stDim>();
+					JU(index) = Tensor::_vec<real, stDim>();
 					return;
 				}
 			}
 #endif
 			
-			Tensor::Vector<real, stDim> sum = AU(index) * (-2. * (
+			Tensor::_vec<real, stDim> sum = AU(index) * (-2. * (
 				1. / (dx(0) * dx(0))
 				+ 1. / (dx(1) * dx(1))
 				+ 1. / (dx(2) * dx(2))
 			));
 			for (int k = 0; k < gridDim; ++k) {
-				Tensor::Vector<int, gridDim> ip = index;
+				Tensor::intN<gridDim> ip = index;
 				ip(k) = std::min<int>(ip(k)+1, n-1);
-				Tensor::Vector<int, gridDim> im = index;
+				Tensor::intN<gridDim> im = index;
 				im(k) = std::max<int>(im(k)-1, 0);
 				sum += (AU(ip) + AU(im)) / (dx(k) * dx(k));
 			}
@@ -263,16 +263,16 @@ int main() {
 	});
 
 	//calculate E and B
-	Tensor::Grid<Tensor::Vector<real, 3>, gridDim> E(size), B(size);
+	Tensor::Grid<Tensor::_vec<real, 3>, gridDim> E(size), B(size);
 
 	//E^i = -grad phi - d/dt A
 	//B^i = curl A
-	parallel.foreach(range.begin(), range.end(), [&](const Tensor::Vector<int, gridDim>& index) {
+	parallel.foreach(range.begin(), range.end(), [&](const Tensor::intN<gridDim>& index) {
 		real dAU[gridDim][stDim];
 		for (int i = 0; i < gridDim; ++i) {
-			Tensor::Vector<int, gridDim> ip = index;
+			Tensor::intN<gridDim> ip = index;
 			ip(i) = std::min<int>(ip(i)+1, n-1);
-			Tensor::Vector<int, gridDim> im = index;
+			Tensor::intN<gridDim> im = index;
 			im(i) = std::max<int>(im(i)-1, 0);
 			for (int u = 0; u < stDim; ++u) {
 				dAU[i][u] = (AU(ip)(u) - AU(im)(u)) / (2. * dx(i));	//... TODO - d/dt AU
@@ -293,57 +293,57 @@ int main() {
 	
 	struct Col {
 		std::string name;
-		std::function<real(Tensor::Vector<int,gridDim>)> func;
-		Col(std::string name_, std::function<real(Tensor::Vector<int,gridDim>)> func_) : name(name_), func(func_) {}
+		std::function<real(Tensor::_vec<int,gridDim>)> func;
+		Col(std::string name_, std::function<real(Tensor::_vec<int,gridDim>)> func_) : name(name_), func(func_) {}
 	};
 	std::vector<Col> cols = {
-		{"ix", [&](Tensor::Vector<int,gridDim> index)->real{ return index(0); }},
-		{"iy", [&](Tensor::Vector<int,gridDim> index)->real{ return index(1); }},
-		{"iz", [&](Tensor::Vector<int,gridDim> index)->real{ return index(2); }},
+		{"ix", [&](Tensor::_vec<int,gridDim> index)->real{ return index(0); }},
+		{"iy", [&](Tensor::_vec<int,gridDim> index)->real{ return index(1); }},
+		{"iz", [&](Tensor::_vec<int,gridDim> index)->real{ return index(2); }},
 	};
 	for (int i = 0; i < stDim; ++i) {
 		cols.push_back(Col(
 			std::string("J^") + std::string(xs[i]),
-			[&,i](Tensor::Vector<int,gridDim> index)->real{ return JU(index)(i); }
+			[&,i](Tensor::_vec<int,gridDim> index)->real{ return JU(index)(i); }
 		));
 	}
 	for (int i = 0; i < stDim; ++i) {
 		cols.push_back(Col(
 			std::string("A^") + std::string(xs[i]),
-			[&,i](Tensor::Vector<int,gridDim> index)->real{ return AU(index)(i); }
+			[&,i](Tensor::_vec<int,gridDim> index)->real{ return AU(index)(i); }
 		));
 	}
 	
-	cols.push_back(Col("E^x", [&](Tensor::Vector<int,gridDim> index)->real{ return E(index)(0); }));
-	cols.push_back(Col("E^y", [&](Tensor::Vector<int,gridDim> index)->real{ return E(index)(1); }));
-	cols.push_back(Col("E^z", [&](Tensor::Vector<int,gridDim> index)->real{ return E(index)(2); }));
-	cols.push_back(Col("B^x", [&](Tensor::Vector<int,gridDim> index)->real{ return B(index)(0); }));
-	cols.push_back(Col("B^y", [&](Tensor::Vector<int,gridDim> index)->real{ return B(index)(1); }));
-	cols.push_back(Col("B^z", [&](Tensor::Vector<int,gridDim> index)->real{ return B(index)(2); }));
+	cols.push_back(Col("E^x", [&](Tensor::_vec<int,gridDim> index)->real{ return E(index)(0); }));
+	cols.push_back(Col("E^y", [&](Tensor::_vec<int,gridDim> index)->real{ return E(index)(1); }));
+	cols.push_back(Col("E^z", [&](Tensor::_vec<int,gridDim> index)->real{ return E(index)(2); }));
+	cols.push_back(Col("B^x", [&](Tensor::_vec<int,gridDim> index)->real{ return B(index)(0); }));
+	cols.push_back(Col("B^y", [&](Tensor::_vec<int,gridDim> index)->real{ return B(index)(1); }));
+	cols.push_back(Col("B^z", [&](Tensor::_vec<int,gridDim> index)->real{ return B(index)(2); }));
 	
-	cols.push_back(Col("|E|", [&](Tensor::Vector<int,gridDim> index)->real{
+	cols.push_back(Col("|E|", [&](Tensor::_vec<int,gridDim> index)->real{
 		return E(index).length();
 	}));
-	cols.push_back(Col("|B|", [&](Tensor::Vector<int,gridDim> index)->real{
+	cols.push_back(Col("|B|", [&](Tensor::_vec<int,gridDim> index)->real{
 		return B(index).length();
 	}));
-	cols.push_back(Col("div_E", [&](Tensor::Vector<int,gridDim> index)->real{
+	cols.push_back(Col("div_E", [&](Tensor::_vec<int,gridDim> index)->real{
 		real div = 0.;
 		for (int i = 0; i < gridDim; ++i) {
-			Tensor::Vector<int, gridDim> ip = index;
+			Tensor::intN<gridDim> ip = index;
 			ip(i) = std::min<int>(ip(i)+1, n-1);
-			Tensor::Vector<int, gridDim> im = index;
+			Tensor::intN<gridDim> im = index;
 			im(i) = std::max<int>(im(i)-1, 0);
 			div += (E(ip)(i) - E(im)(i)) / (2. * dx(i));	//... TODO - d/dt AU
 		}
 		return div;
 	}));
-	cols.push_back(Col("div_B", [&](Tensor::Vector<int,gridDim> index)->real{
+	cols.push_back(Col("div_B", [&](Tensor::_vec<int,gridDim> index)->real{
 		real div = 0.;
 		for (int i = 0; i < gridDim; ++i) {
-			Tensor::Vector<int, gridDim> ip = index;
+			Tensor::intN<gridDim> ip = index;
 			ip(i) = std::min<int>(ip(i)+1, n-1);
-			Tensor::Vector<int, gridDim> im = index;
+			Tensor::intN<gridDim> im = index;
 			im(i) = std::max<int>(im(i)-1, 0);
 			div += (B(ip)(i) - B(im)(i)) / (2. * dx(i));	//... TODO - d/dt AU
 		}

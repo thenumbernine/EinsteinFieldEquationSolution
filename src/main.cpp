@@ -87,24 +87,24 @@ using real_Sub_Sub = vecSubDim<vecSubDim<real>>;
 using real_SymSub = symSubDim<real>;
 
 //dim
-using real_Dim = Tensor::_tensori<real, Tensor::index_vec<dim>>;
+using real_Dim = Tensor::_tensori<real, Tensor::storage_vec<dim>>;
 
-using real_SymDim = Tensor::_tensori<real, Tensor::index_sym<dim>>;
-using real_Dim_Dim = Tensor::_tensori<real, Tensor::index_vec<dim>, Tensor::index_vec<dim>>;
+using real_SymDim = Tensor::_tensori<real, Tensor::storage_sym<dim>>;
+using real_Dim_Dim = Tensor::_tensori<real, Tensor::storage_vec<dim>, Tensor::storage_vec<dim>>;
 
-using real_Dim_SymDim = Tensor::_tensori<real, Tensor::index_vec<dim>, Tensor::index_sym<dim>>;
-using real_SymDim_Dim = Tensor::_tensori<real, Tensor::index_sym<dim>, Tensor::index_vec<dim>>;
+using real_Dim_SymDim = Tensor::_tensori<real, Tensor::storage_vec<dim>, Tensor::storage_sym<dim>>;
+using real_SymDim_Dim = Tensor::_tensori<real, Tensor::storage_sym<dim>, Tensor::storage_vec<dim>>;
 
 using real_Dim_Dim_Dim = Tensor::_tensor<real, dim, dim, dim>;
 
-using real_Dim_SymDim_Dim = Tensor::_tensori<real, Tensor::index_vec<dim>, Tensor::index_sym<dim>, Tensor::index_vec<dim>>;
-using real_SymDim_SymDim = Tensor::_tensori<real, Tensor::index_sym<dim>, Tensor::index_sym<dim>>;
+using real_Dim_SymDim_Dim = Tensor::_tensori<real, Tensor::storage_vec<dim>, Tensor::storage_sym<dim>, Tensor::storage_vec<dim>>;
+using real_SymDim_SymDim = Tensor::_tensori<real, Tensor::storage_sym<dim>, Tensor::storage_sym<dim>>;
 using real_Dim_Dim_Dim_Dim = Tensor::_tensor<real, dim, dim, dim, dim>;
 
 //mixed subDim & dim
-using real_Sub_SymDim = Tensor::_tensori<real, Tensor::index_vec<subDim>, Tensor::index_sym<dim>>;
-using real_Sub_Dim_SymDim = Tensor::_tensori<real, Tensor::index_vec<subDim>, Tensor::index_vec<dim>, Tensor::index_sym<dim>>;
-using real_Sub_SymDim_Dim = Tensor::_tensori<real, Tensor::index_vec<subDim>, Tensor::index_sym<dim>, Tensor::index_vec<dim>>;
+using real_Sub_SymDim = Tensor::_tensori<real, Tensor::storage_vec<subDim>, Tensor::storage_sym<dim>>;
+using real_Sub_Dim_SymDim = Tensor::_tensori<real, Tensor::storage_vec<subDim>, Tensor::storage_vec<dim>, Tensor::storage_sym<dim>>;
+using real_Sub_SymDim_Dim = Tensor::_tensori<real, Tensor::storage_vec<subDim>, Tensor::storage_sym<dim>, Tensor::storage_vec<dim>>;
 
 using int_Sub = vecSubDim<int>;
 using int_Sub = Tensor::_tensor<int, subDim>;
@@ -423,7 +423,7 @@ void calc_GammaULLs(
 	parallel.foreach(range.begin(), range.end(), [&](int_Sub const & index) {
 		//derivatives of the metric in spatial coordinates using finite difference
 		//the templated method (1) stores derivative first and (2) only stores spatial
-		real_Sub_SymDim dgLLL3 = Tensor::partialDerivative<partialDerivativeOrder, real, subDim, real_SymDim>(
+		real_Sub_SymDim dgLLL3 = Tensor::partialDerivativeGrid<partialDerivativeOrder, real, subDim, real_SymDim>(
 			index, dx,
 			[&](int_Sub index) -> real_SymDim {
 				index = Tensor::clamp(index, int_Sub(), sizev-1);
@@ -491,7 +491,7 @@ real_SymDim calc_EinsteinLL(
 	real_Dim_SymDim const & GammaULL = GammaULLs(index);
 #if 0	//calc first derivative of Gamma^a_bc's
 	//connection derivative
-	real_Sub_Dim_SymDim dGammaLULL3 = Tensor::partialDerivative<partialDerivativeOrder, real, subDim, real_Dim_SymDim>(
+	real_Sub_Dim_SymDim dGammaLULL3 = Tensor::partialDerivativeGrid<partialDerivativeOrder, real, subDim, real_Dim_SymDim>(
 		index, dx, [&](int_Sub index) -> real_Dim_SymDim {
 			index = Tensor::clamp(index, int_Sub(), sizev-1);
 
@@ -553,7 +553,7 @@ Gamma^a_bc,d = 1/2 (g^ae (g_eb,c + g_ec,b - g_bc,e)),d
 	}
 
 	//g_ab,ci
-	real_Sub_SymDim_Dim d2gLLLL3 = Tensor::partialDerivative<partialDerivativeOrder, real, subDim, real_SymDim_Dim>(
+	real_Sub_SymDim_Dim d2gLLLL3 = Tensor::partialDerivativeGrid<partialDerivativeOrder, real, subDim, real_SymDim_Dim>(
 		index, dx,
 		[&](int_Sub index) -> real_SymDim_Dim {
 			index = Tensor::clamp(index, int_Sub(), sizev-1);

@@ -239,7 +239,7 @@ Tensor::Grid<real_Dim_SymDim, subDim> GammaULLs;
 
 template<typename CellType>
 void allocateGrid(Tensor::Grid<CellType, subDim>& grid, std::string name, int_Sub sizev, size_t& totalSize) {
-	size_t size = sizeof(CellType) * sizev.volume();
+	size_t size = sizeof(CellType) * sizev.product();
 	totalSize += size;
 	std::cout << name << ": " << size << " bytes, running total: " << totalSize << std::endl;
 	grid.resize(sizev);
@@ -2117,7 +2117,7 @@ std::cout << "creating body " << bodyName << std::endl;
 
 	xmin = {-bodyRadii*body->radius, -bodyRadii*body->radius, -bodyRadii*body->radius};
 	xmax = {bodyRadii*body->radius, bodyRadii*body->radius, bodyRadii*body->radius};
-	gridVolume = sizev.volume();
+	gridVolume = sizev.product();
 	dx = (xmax - xmin) / (real_Sub)sizev;
 
 	Tensor::Grid<real_Sub, subDim> xs;

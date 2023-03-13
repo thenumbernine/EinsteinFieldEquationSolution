@@ -157,7 +157,7 @@ int main() {
 	//lazy rasterization
 	real q = 1;	//Coulombs (C)
 	q *= sqrt(ke * G) / (c * c);	//...times Columbs to meters (m)
-	q *= dx.volume();	// ... per meter cubed (1/m^2)
+	q *= dx.product();	// ... per meter cubed (1/m^2)
 //q = 1e-22 for n=64 (dx=.03125)
 //that might be too small for the solvers...
 //q = 1;
@@ -237,7 +237,7 @@ int main() {
 		});
 	};
 
-	int volume = size.volume() * stDim;
+	int volume = size.product() * stDim;
 
 //hmm, some problems:
 //ConjGrad is segfaulting

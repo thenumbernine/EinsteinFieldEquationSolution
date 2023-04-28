@@ -69,16 +69,16 @@ static constexpr auto subDim = 3;	//spatial dim
 static constexpr auto dim = subDim+1;
 
 template<typename T>
-using vecDim = Tensor::_vec<T,dim>;
+using vecDim = Tensor::vec<T,dim>;
 
 template<typename T>
-using vecSubDim = Tensor::_vec<T,subDim>;
+using vecSubDim = Tensor::vec<T,subDim>;
 
 template<typename T>
-using symDim = Tensor::_sym<T,dim>;
+using symDim = Tensor::sym<T,dim>;
 
 template<typename T>
-using symSubDim = Tensor::_sym<T,subDim>;
+using symSubDim = Tensor::sym<T,subDim>;
 
 
 //subDim
@@ -87,27 +87,27 @@ using real_Sub_Sub = vecSubDim<vecSubDim<real>>;
 using real_SymSub = symSubDim<real>;
 
 //dim
-using real_Dim = Tensor::_tensori<real, Tensor::storage_vec<dim>>;
+using real_Dim = Tensor::tensori<real, Tensor::storage_vec<dim>>;
 
-using real_SymDim = Tensor::_tensori<real, Tensor::storage_sym<dim>>;
-using real_Dim_Dim = Tensor::_tensori<real, Tensor::storage_vec<dim>, Tensor::storage_vec<dim>>;
+using real_SymDim = Tensor::tensori<real, Tensor::storage_sym<dim>>;
+using real_Dim_Dim = Tensor::tensori<real, Tensor::storage_vec<dim>, Tensor::storage_vec<dim>>;
 
-using real_Dim_SymDim = Tensor::_tensori<real, Tensor::storage_vec<dim>, Tensor::storage_sym<dim>>;
-using real_SymDim_Dim = Tensor::_tensori<real, Tensor::storage_sym<dim>, Tensor::storage_vec<dim>>;
+using real_Dim_SymDim = Tensor::tensori<real, Tensor::storage_vec<dim>, Tensor::storage_sym<dim>>;
+using real_SymDim_Dim = Tensor::tensori<real, Tensor::storage_sym<dim>, Tensor::storage_vec<dim>>;
 
-using real_Dim_Dim_Dim = Tensor::_tensor<real, dim, dim, dim>;
+using real_Dim_Dim_Dim = Tensor::tensor<real, dim, dim, dim>;
 
-using real_Dim_SymDim_Dim = Tensor::_tensori<real, Tensor::storage_vec<dim>, Tensor::storage_sym<dim>, Tensor::storage_vec<dim>>;
-using real_SymDim_SymDim = Tensor::_tensori<real, Tensor::storage_sym<dim>, Tensor::storage_sym<dim>>;
-using real_Dim_Dim_Dim_Dim = Tensor::_tensor<real, dim, dim, dim, dim>;
+using real_Dim_SymDim_Dim = Tensor::tensori<real, Tensor::storage_vec<dim>, Tensor::storage_sym<dim>, Tensor::storage_vec<dim>>;
+using real_SymDim_SymDim = Tensor::tensori<real, Tensor::storage_sym<dim>, Tensor::storage_sym<dim>>;
+using real_Dim_Dim_Dim_Dim = Tensor::tensor<real, dim, dim, dim, dim>;
 
 //mixed subDim & dim
-using real_Sub_SymDim = Tensor::_tensori<real, Tensor::storage_vec<subDim>, Tensor::storage_sym<dim>>;
-using real_Sub_Dim_SymDim = Tensor::_tensori<real, Tensor::storage_vec<subDim>, Tensor::storage_vec<dim>, Tensor::storage_sym<dim>>;
-using real_Sub_SymDim_Dim = Tensor::_tensori<real, Tensor::storage_vec<subDim>, Tensor::storage_sym<dim>, Tensor::storage_vec<dim>>;
+using real_Sub_SymDim = Tensor::tensori<real, Tensor::storage_vec<subDim>, Tensor::storage_sym<dim>>;
+using real_Sub_Dim_SymDim = Tensor::tensori<real, Tensor::storage_vec<subDim>, Tensor::storage_vec<dim>, Tensor::storage_sym<dim>>;
+using real_Sub_SymDim_Dim = Tensor::tensori<real, Tensor::storage_vec<subDim>, Tensor::storage_sym<dim>, Tensor::storage_vec<dim>>;
 
 using int_Sub = vecSubDim<int>;
-using int_Sub = Tensor::_tensor<int, subDim>;
+using int_Sub = Tensor::tensor<int, subDim>;
 
 template<typename T>
 struct gridFromPtr {
@@ -1889,7 +1889,7 @@ struct StellarSchwarzschildInitCond : public SphericalBodyInitCond {
 			//real omega = 1;	//angular velocity of the speed of light
 			real omega = c;	//I'm trying to find a difference ...
 			real t = 0;	//where the position should be.  t=0 means the body is moved by [L, 0], and its derivatives are along [0, L omega] 
-			Tensor::_vec2<real> dt_xHat(L * omega * sin(omega * t), -L * omega * cos(omega * t));
+			Tensor::vec2<real> dt_xHat(L * omega * sin(omega * t), -L * omega * cos(omega * t));
 			dt_metricPrims.alphaMinusOne = dr_alpha * (xi(0)/r * dt_xHat(0) + xi(1)/r * dt_xHat(1)) - 1.;
 			for (int i = 0; i < subDim; ++i) {
 				dt_metricPrims.betaU(i) = 0;

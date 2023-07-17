@@ -176,7 +176,7 @@ gnuplot{
 -- constant density vs PREM
 
 local function loadtable(fn)
-	return file(fn):read():trim():split'\n':filter(function(l)
+	return path(fn):read():trim():split'\n':filter(function(l)
 		return l:sub(1,1) ~= '#'
 	end):map(function(l)
 		return l:split'%s+':map(tonumber:o(I))

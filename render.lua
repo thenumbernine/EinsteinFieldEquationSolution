@@ -227,7 +227,7 @@ void main() {
 			volTex = 0,
 			hsvTex = 1,
 		},
-	}
+	}:useNone()
 
 	glreport'here'
 

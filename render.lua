@@ -64,7 +64,7 @@ showGradTrace = false
 showCurlTrace = false
 flipGradient = false
 
-local App = class(ImGuiApp)
+local App = ImGuiApp:subclass()
 
 function App:initGL()
 	App.super.initGL(self)

@@ -65,6 +65,7 @@ showCurlTrace = false
 flipGradient = false
 
 local App = ImGuiApp:subclass()
+App.viewUseGLMatrixMode= true
 
 function App:initGL()
 	App.super.initGL(self)
@@ -241,25 +242,19 @@ end
 local leftShiftDown
 local rightShiftDown
 local imguiCapturing
-function App:event(event, eventPtr)
-	App.super.event(self, event, eventPtr)
+function App:event(eventPtr)
+	App.super.event(self, eventPtr)
 	imguiCapturing = ig.igGetIO()[0].WantCaptureKeyboard
 	if imguiCapturing then return end
 	
-	if event.type == sdl.SDL_MOUSEBUTTONDOWN then
-		if event.button.button == sdl.SDL_BUTTON_WHEELUP then
-			orbitTargetDistance = orbitTargetDistance * orbitZoomFactor
-		elseif event.button.button == sdl.SDL_BUTTON_WHEELDOWN then
-			orbitTargetDistance = orbitTargetDistance / orbitZoomFactor
-		end
-	elseif event.type == sdl.SDL_KEYDOWN or event.type == sdl.SDL_KEYUP then
-		if event.key.keysym.sym == sdl.SDLK_LSHIFT then
-			leftShiftDown = event.type == sdl.SDL_KEYDOWN
-		elseif event.key.keysym.sym == sdl.SDLK_RSHIFT then
-			rightShiftDown = event.type == sdl.SDL_KEYDOWN
-		elseif event.key.keysym.sym == sdl.SDLK_UP and event.type == sdl.SDL_KEYUP then
+	if eventPtr[0].type == sdl.SDL_KEYDOWN or eventPtr[0].type == sdl.SDL_KEYUP then
+		if eventPtr[0].key.keysym.sym == sdl.SDLK_LSHIFT then
+			leftShiftDown = eventPtr[0].type == sdl.SDL_KEYDOWN
+		elseif eventPtr[0].key.keysym.sym == sdl.SDLK_RSHIFT then
+			rightShiftDown = eventPtr[0].type == sdl.SDL_KEYDOWN
+		elseif eventPtr[0].key.keysym.sym == sdl.SDLK_UP and eventPtr[0].type == sdl.SDL_KEYUP then
 			col = math.max(4, col - 1)
-		elseif event.key.keysym.sym == sdl.SDLK_DOWN and event.type == sdl.SDL_KEYDOWN then
+		elseif eventPtr[0].key.keysym.sym == sdl.SDLK_DOWN and eventPtr[0].type == sdl.SDL_KEYDOWN then
 			col = math.min(colmax, col + 1)
 		end
 	end
@@ -313,7 +308,7 @@ function App:update()
 	gl.glRotated(-aa[4], aa[1], aa[2], aa[3])
 
 	for i,clipInfo in ipairs(clipInfos) do
-		gl.glClipPlane(gl.GL_CLIP_PLANE0+i-1, vec4d(clipInfo.plane:unpack()):ptr())
+		gl.glClipPlane(gl.GL_CLIP_PLANE0+i-1, vec4d(clipInfo.plane:unpack()).s)
 	end
 
 	gl.glTranslatef(-.5, -.5, -.5)
@@ -335,9 +330,9 @@ function App:update()
 	gl.glTexGeni(gl.GL_S, gl.GL_TEXTURE_GEN_MODE, gl.GL_OBJECT_LINEAR)
 	gl.glTexGeni(gl.GL_T, gl.GL_TEXTURE_GEN_MODE, gl.GL_OBJECT_LINEAR)
 	gl.glTexGeni(gl.GL_R, gl.GL_TEXTURE_GEN_MODE, gl.GL_OBJECT_LINEAR)
-	gl.glTexGendv(gl.GL_S, gl.GL_OBJECT_PLANE, vec4d(1,0,0,0):ptr())
-	gl.glTexGendv(gl.GL_T, gl.GL_OBJECT_PLANE, vec4d(0,1,0,0):ptr())
-	gl.glTexGendv(gl.GL_R, gl.GL_OBJECT_PLANE, vec4d(0,0,1,0):ptr())
+	gl.glTexGendv(gl.GL_S, gl.GL_OBJECT_PLANE, vec4d(1,0,0,0).s)
+	gl.glTexGendv(gl.GL_T, gl.GL_OBJECT_PLANE, vec4d(0,1,0,0).s)
+	gl.glTexGendv(gl.GL_R, gl.GL_OBJECT_PLANE, vec4d(0,0,1,0).s)
 
 	gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
 	gl.glEnable(gl.GL_BLEND)
@@ -536,7 +531,9 @@ function App:update()
 	App.super.update(self)
 end
 
+print'App:updateGUI() FIXME'
 function App:updateGUI()
+do return end -- TODO FIXME lots in here is broken
 	col = col - 4
 	ig.luatableCombo('column', _G, 'col', colnames and colnames:sub(4) or range(4,colmax))
 	col = col + 4

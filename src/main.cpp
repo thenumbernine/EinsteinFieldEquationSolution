@@ -8,6 +8,7 @@ might get into trouble ensuring the hamiltonian or momentum constraints are fulf
 #include <iostream>
 #include <cmath>
 
+#if 0	//TODO only for float128 and when it is supported
 namespace std {
 bool isfinite(__float128 f) {
 	double d = f;
@@ -18,7 +19,7 @@ ostream& operator<<(ostream& o, __float128 f) {
 	return o << d;
 }
 }
-
+#endif
 
 #include "Solver/ConjGrad.h"
 #include "Solver/ConjRes.h"
@@ -63,6 +64,7 @@ void time(std::string const & name, std::function<void()> f) {
 
 //using real = float;
 using real = double;
+//using real = long double;	// maybe float80 but idk
 //using real = __float128;
 
 static constexpr auto subDim = 3;	//spatial dim

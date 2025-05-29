@@ -250,15 +250,15 @@ function App:event(eventPtr)
 	if eventPtr[0].type == sdl.SDL_EVENT_KEY_DOWN
 	or eventPtr[0].type == sdl.SDL_EVENT_KEY_UP
 	then
-		if eventPtr[0].key.keysym.sym == sdl.SDLK_LSHIFT then
+		if eventPtr[0].key.key == sdl.SDLK_LSHIFT then
 			leftShiftDown = eventPtr[0].type == sdl.SDL_EVENT_KEY_DOWN
-		elseif eventPtr[0].key.keysym.sym == sdl.SDLK_RSHIFT then
+		elseif eventPtr[0].key.key == sdl.SDLK_RSHIFT then
 			rightShiftDown = eventPtr[0].type == sdl.SDL_EVENT_KEY_DOWN
-		elseif eventPtr[0].key.keysym.sym == sdl.SDLK_UP
+		elseif eventPtr[0].key.key == sdl.SDLK_UP
 		and eventPtr[0].type == sdl.SDL_EVENT_KEY_UP
 		then
 			col = math.max(4, col - 1)
-		elseif eventPtr[0].key.keysym.sym == sdl.SDLK_DOWN
+		elseif eventPtr[0].key.key == sdl.SDLK_DOWN
 		and eventPtr[0].type == sdl.SDL_EVENT_KEY_DOWN
 		then
 			col = math.min(colmax, col + 1)

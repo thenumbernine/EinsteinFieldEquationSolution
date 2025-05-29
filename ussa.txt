@@ -1,4 +1,5 @@
 # https://en.wikipedia.org/wiki/U.S._Standard_Atmosphere
+# TODO combine this with the PREM
 # altitude(m) altitude(ft) pressure(Pa) pressure(inHg) temperature(K) tempLapseRate(K/m) tempLapseRate(K/ft)
 0 	0 	101325 	29.92126 	288.15 	-0.0065 	-0.0019812
 11000 	36089 	22632.1 	6.683245 	216.65 	0.0 	0.0

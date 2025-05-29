@@ -247,14 +247,20 @@ function App:event(eventPtr)
 	imguiCapturing = ig.igGetIO()[0].WantCaptureKeyboard
 	if imguiCapturing then return end
 	
-	if eventPtr[0].type == sdl.SDL_KEYDOWN or eventPtr[0].type == sdl.SDL_KEYUP then
+	if eventPtr[0].type == sdl.SDL_EVENT_KEY_DOWN
+	or eventPtr[0].type == sdl.SDL_EVENT_KEY_UP
+	then
 		if eventPtr[0].key.keysym.sym == sdl.SDLK_LSHIFT then
-			leftShiftDown = eventPtr[0].type == sdl.SDL_KEYDOWN
+			leftShiftDown = eventPtr[0].type == sdl.SDL_EVENT_KEY_DOWN
 		elseif eventPtr[0].key.keysym.sym == sdl.SDLK_RSHIFT then
-			rightShiftDown = eventPtr[0].type == sdl.SDL_KEYDOWN
-		elseif eventPtr[0].key.keysym.sym == sdl.SDLK_UP and eventPtr[0].type == sdl.SDL_KEYUP then
+			rightShiftDown = eventPtr[0].type == sdl.SDL_EVENT_KEY_DOWN
+		elseif eventPtr[0].key.keysym.sym == sdl.SDLK_UP
+		and eventPtr[0].type == sdl.SDL_EVENT_KEY_UP
+		then
 			col = math.max(4, col - 1)
-		elseif eventPtr[0].key.keysym.sym == sdl.SDLK_DOWN and eventPtr[0].type == sdl.SDL_KEYDOWN then
+		elseif eventPtr[0].key.keysym.sym == sdl.SDLK_DOWN
+		and eventPtr[0].type == sdl.SDL_EVENT_KEY_DOWN
+		then
 			col = math.min(colmax, col + 1)
 		end
 	end

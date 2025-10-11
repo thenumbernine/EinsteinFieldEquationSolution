@@ -21,6 +21,11 @@ local Tex2D = require 'gl.tex2d'
 local Tex3D = require 'gl.tex3d'
 local Program = require 'gl.program'
 
+
+local uint8_t_arr = ffi.typeof'uint8_t[?]'
+local int_4 = ffi.typeof'int[4]'
+
+
 local usePoints = false
 if _G.usePoints ~= nil then usePoints = _G.usePoints end
 local useSlices = true
@@ -108,7 +113,7 @@ end
 --]]
 
 	-- this assumes our points are sequential (and that they are power-of-two?)
-	local data = ffi.new('unsigned char[?]', #self.pts*4)
+	local data = uint8_t_arr(#self.pts*4)
 	for col=4,colmax do
 		for i,pt in ipairs(self.pts) do
 			local f = (pt[col] - self.min[col]) / (self.max[col] - self.min[col])
@@ -166,7 +171,7 @@ end
 --]]
 		false)
 	-- change to 2D so imgui can use it
-	local data = ffi.new('unsigned char[?]', hsvWidth*4)
+	local data = uint8_t_arr(hsvWidth*4)
 	hsvTex:toCPU(data)
 	hsvTex:unbind()
 	hsvTex:delete()
@@ -327,7 +332,7 @@ function App:update()
 	gl.glUniform1f(volumeShader.uniforms.alpha.loc, alpha)
 	gl.glUniform1f(volumeShader.uniforms.alphaGamma.loc, alphaGamma)
 	gl.glUniform1iv(volumeShader.uniforms['clipEnabled[0]'].loc, 4,
-		ffi.new('int[4]', clipInfos:map(function(info) return info.enabled end)))
+		int_4(clipInfos:map(function(info) return info.enabled end)))
 	gl.glUniform1i(volumeShader.uniforms.flipGradient.loc, flipGradient)
 
 	gl.glEnable(gl.GL_TEXTURE_GEN_S)

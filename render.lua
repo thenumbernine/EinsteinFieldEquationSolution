@@ -14,7 +14,6 @@ local quat = require 'vec.quat'
 local vec3 = require 'vec.vec3'
 local vec4 = require 'vec.vec4'
 local vec4d = require 'vec-ffi.vec4d'
-local glreport = require 'gl.report'
 local glcall = require 'gl.call'
 local GradientTex = require 'gl.gradienttex'
 local Tex2D = require 'gl.tex2d'
@@ -234,8 +233,6 @@ void main() {
 			hsvTex = 1,
 		},
 	}:useNone()
-
-	glreport'here'
 
 	for i,name in ipairs(colnames) do
 		print(name, self.min[i], self.max[i])
@@ -536,8 +533,6 @@ function App:update()
 			gl.glDisable(gl.GL_CLIP_PLANE0+i-1)
 		end
 	end
-
-	glreport'here'
 
 	App.super.update(self)
 end

@@ -171,9 +171,11 @@ end
 		false)
 	-- change to 2D so imgui can use it
 	local data = uint8_t_arr(hsvWidth*4)
-	hsvTex:toCPU(data)
-	hsvTex:unbind()
-	hsvTex:delete()
+	hsvTex
+		:bind()
+		:getImage(data)
+		:unbind()
+		:delete()
 	hsvTex = Tex2D{
 		internalFormat = gl.GL_RGBA,
 		width = hsvWidth,

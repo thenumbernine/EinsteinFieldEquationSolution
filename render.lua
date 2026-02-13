@@ -9,7 +9,6 @@ local gl = require 'gl'
 local sdl = require 'sdl'
 local ig = require 'imgui'
 local ImGuiApp = require 'imgui.app'
-local Mouse = require 'glapp.mouse'
 local quat = require 'vec.quat'
 local vec3 = require 'vec.vec3'
 local vec4 = require 'vec.vec4'
@@ -33,7 +32,6 @@ if _G.useSlices ~= nil then useSlices = _G.useSlices end
 local filename, col = ...
 filename = filename or 'out.txt'
 
-local mouse = Mouse()
 local viewAngle = quat()
 local viewDist = 2
 	
@@ -68,7 +66,7 @@ showGradTrace = false
 showCurlTrace = false
 flipGradient = false
 
-local App = ImGuiApp:subclass()
+local App = require 'sdl.mouse'.apply(ImGuiApp):subclass()
 App.viewUseGLMatrixMode= true
 
 function App:initGL()
@@ -247,6 +245,7 @@ local leftShiftDown
 local rightShiftDown
 local imguiCapturing
 function App:event(eventPtr)
+	self.mouse.cantHandleEvent = ig.igGetIO()[0].WantCaptureMouse
 	App.super.event(self, eventPtr)
 	imguiCapturing = ig.igGetIO()[0].WantCaptureKeyboard
 	if imguiCapturing then return end
@@ -271,9 +270,7 @@ function App:event(eventPtr)
 end
 
 function App:update()
-	if not imguiCapturing then
-		mouse:update()
-	end
+	local mouse = self.mouse
 	if mouse.leftDragging then
 		if leftShiftDown or rightShiftDown then
 			if rotateClip == 0 then
